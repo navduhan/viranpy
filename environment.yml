@@ -1,0 +1,40 @@
+name: viranpy
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  # Core Python packages
+  - python=3.8
+  - pip
+  
+  # Bioinformatics tools (from bioconda)
+  - bwa
+  - samtools
+  - bowtie2
+  - spades
+  - megahit
+  - cd-hit
+  - kraken2
+  - krona
+  - quast
+  - prodigal
+  - blast
+  - diamond
+  - hmmer
+  - infernal
+  - fastqc
+  - trim-galore
+  
+  # Python packages for analysis
+  - biopython
+  - pandas
+  - numpy
+  - matplotlib
+  - seaborn
+
+  #pip dependencies
+  - pip:
+    - pyhummer
+    - tqdm
+  

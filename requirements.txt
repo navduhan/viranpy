@@ -1,0 +1,10 @@
+# Core dependencies for ViRAnPy
+biopython>=1.79
+pandas>=1.3.0
+numpy>=1.21.0
+matplotlib>=3.5.0
+seaborn>=0.11.0
+tqdm
+
+# Optional: For enhanced reporting (if available)
+# plotly>=5.0.0  # For interactive plots in HTML reports 
