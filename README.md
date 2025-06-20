@@ -486,13 +486,3 @@ We thank the developers and maintainers of these tools for their excellent work 
 
 If you use ViRAnPy in your research, please cite:
 
-```bibtex
-@article{viranpy2024,
-  title={ViRAnPy: A Comprehensive Viral Metagenomic Analysis Pipeline with Automated Database Management},
-  author={Duhan, N. and ViRAnPy Development Team},
-  journal={Bioinformatics},
-  year={2024},
-  doi={10.1093/bioinformatics/xxx},
-  note={A unified platform for viral metagenomic analysis from raw reads to annotation}
-}
-```
