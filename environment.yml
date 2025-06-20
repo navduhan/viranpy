@@ -35,6 +35,6 @@ dependencies:
 
   #pip dependencies
   - pip:
-    - pyhummer
+    - pyhmmer
     - tqdm
   
