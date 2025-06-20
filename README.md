@@ -2,8 +2,8 @@
 
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![License: GPLv3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
-[![Version](https://img.shields.io/badge/version-0.1.0-blue.svg)](https://github.com/naveenduhan/viranpy/releases)
-[![Documentation](https://img.shields.io/badge/docs-latest-brightgreen.svg)](https://github.com/naveenduhan/viranpy)
+[![Version](https://img.shields.io/badge/version-0.1.0-blue.svg)](https://github.com/navduhan/viranpy/releases)
+[![Documentation](https://img.shields.io/badge/docs-latest-brightgreen.svg)](https://github.com/navduhan/viranpy)
 
 **ViRAnPy** is a comprehensive viral metagenomic analysis pipeline designed for viral genome assembly, annotation, taxonomic classification, coverage analysis, and quality assessment. Built for researchers working with viral metagenomic data, including both DNA and RNA viruses, as well as segmented viruses.
 
@@ -377,10 +377,10 @@ The `--build-databases` command installs the following databases:
 
 ## 📖 Documentation
 
-- [Viral Metagenomic Workflow](https://github.com/naveenduhan/viranpy/blob/main/docs/metagenomic_workflow.md): Comprehensive guide for viral metagenomic analysis
-- [Installation Guide](https://github.com/naveenduhan/viranpy/blob/main/docs/installation.md): Detailed installation instructions
-- [API Reference](https://github.com/naveenduhan/viranpy/blob/main/docs/api.md): Python API documentation
-- [Examples](https://github.com/naveenduhan/viranpy/blob/main/docs/examples.md): Usage examples and tutorials
+- [Viral Metagenomic Workflow](https://github.com/navduhan/viranpy/blob/main/docs/metagenomic_workflow.md): Comprehensive guide for viral metagenomic analysis
+- [Installation Guide](https://github.com/navduhan/viranpy/blob/main/docs/installation.md): Detailed installation instructions
+- [API Reference](https://github.com/navduhan/viranpy/blob/main/docs/api.md): Python API documentation
+- [Examples](https://github.com/navduhan/viranpy/blob/main/docs/examples.md): Usage examples and tutorials
 
 ## 🎯 Use Cases
 
@@ -409,7 +409,7 @@ The `--build-databases` command installs the following databases:
 
 ## 🤝 Contributing
 
-We welcome contributions! Please see our [Contributing Guidelines](https://github.com/naveenduhan/viranpy/blob/main/CONTRIBUTING.md) for details.
+We welcome contributions! Please see our [Contributing Guidelines](https://github.com/navduhan/viranpy/blob/main/CONTRIBUTING.md) for details.
 
 ### Development Setup
 
@@ -432,7 +432,7 @@ pytest tests/
 
 ## 📄 License
 
-This project is licensed under the GPLv3 License - see the [LICENSE](https://github.com/naveenduhan/viranpy/blob/main/LICENSE) file for details.
+This project is licensed under the GPLv3 License - see the [LICENSE](https://github.com/navduhan/viranpy/blob/main/LICENSE) file for details.
 
 ## 🔧 External Tools and Databases
 
@@ -478,9 +478,9 @@ We thank the developers and maintainers of these tools for their excellent work 
 
 ## 📞 Support
 
-- **Issues**: [GitHub Issues](https://github.com/naveenduhan/viranpy/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/naveenduhan/viranpy/discussions)
-- **Documentation**: [GitHub Wiki](https://github.com/naveenduhan/viranpy/wiki)
+- **Issues**: [GitHub Issues](https://github.com/navduhan/viranpy/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/navduhan/viranpy/discussions)
+- **Documentation**: [GitHub Wiki](https://github.com/navduhan/viranpy/wiki)
 
 ## 🔬 Citation
 
