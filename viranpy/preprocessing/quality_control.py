@@ -110,12 +110,18 @@ class QualityController:
         
         cmd.extend(input_files)
         
+        # Debug logging
+        self.logger.info(f"Trim Galore input files: {input_files}")
+        self.logger.info(f"Trim Galore paired mode: {paired}")
+        self.logger.info(f"Trim Galore command: {' '.join(cmd)}")
+        
         try:
             subprocess.run(cmd, check=True)
             self.logger.info(f"Trim Galore completed for {len(input_files)} files")
             
             # Get trimmed file paths
             trimmed_files = self._get_trimmed_files(output_dir, input_files, paired)
+            self.logger.info(f"Trim Galore found trimmed files: {trimmed_files}")
             return {"success": True, "trimmed_files": trimmed_files}
             
         except subprocess.CalledProcessError as e:
@@ -159,15 +165,23 @@ class QualityController:
         """Get paths to trimmed files."""
         trimmed_files = []
         
-        for input_file in input_files:
-            base_name = Path(input_file).stem.replace('.fastq', '').replace('.fq', '')
-            if paired:
-                trimmed_file = Path(output_dir) / f"{base_name}_val_1.fq.gz"
-            else:
+        if paired:
+            # For paired-end, we need to find both R1 and R2 files
+            # Trim Galore creates _val_1.fq.gz and _val_2.fq.gz for paired files
+            # We'll look for all _val_*.fq.gz files and sort them
+            output_path = Path(output_dir)
+            val_files = list(output_path.glob("*_val_*.fq.gz"))
+            val_files.sort()  # This will sort _val_1 before _val_2
+            trimmed_files = [str(f) for f in val_files if f.exists()]
+            self.logger.info(f"Found {len(trimmed_files)} paired trimmed files: {trimmed_files}")
+        else:
+            # For single-end, look for _trimmed.fq.gz files
+            for input_file in input_files:
+                base_name = Path(input_file).stem.replace('.fastq', '').replace('.fq', '')
                 trimmed_file = Path(output_dir) / f"{base_name}_trimmed.fq.gz"
-            
-            if trimmed_file.exists():
-                trimmed_files.append(str(trimmed_file))
+                
+                if trimmed_file.exists():
+                    trimmed_files.append(str(trimmed_file))
         
         return trimmed_files
     

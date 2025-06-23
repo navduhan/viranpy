@@ -290,8 +290,8 @@ Examples:
         help='Using BLAST to predict protein function based on homology (Default: False)'
     )
     advanced_general_group.add_argument(
-        "--memory", dest="memory", type=int, default=None,
-        help='General memory limit in GB for tools that support it (Default: tool-specific or system default)', metavar="INT"
+        "--memory", dest="memory", type=str, default=None,
+        help='Memory limit for tools (e.g., "16G", "8GB", "16384M"). For MEGAHIT on Mac, this is required and converted to bytes. Default: system-based (16GB if >=16GB RAM, 75% of system RAM otherwise)', metavar="MEMORY"
     )
     
     # Advanced circularity options

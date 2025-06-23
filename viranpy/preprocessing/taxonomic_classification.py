@@ -68,47 +68,73 @@ class TaxonomicClassifier:
         
         results = {}
         
-        for i, input_file in enumerate(input_files):
-            base_name = Path(input_file).stem
-            report_file = Path(output_dir) / f"{base_name}_kraken2.report"
-            output_file = Path(output_dir) / f"{base_name}_kraken2.out"
-            
-            cmd = [
-                "kraken2",
-                "--db", kraken_db,
-                "--output", str(output_file),
-                "--report", str(report_file),
-                "--threads", str(self.config.ncpus or 1)
-            ]
-            
-            if paired and i % 2 == 0:
-                # For paired reads, process both files together
+        if paired:
+            # For paired-end, process files in pairs (R1, R2)
+            for i in range(0, len(input_files), 2):
                 if i + 1 < len(input_files):
-                    cmd.extend([input_file, input_files[i + 1]])
-                    self.logger.info(f"Kraken2 paired-end command: R1={input_file}, R2={input_files[i + 1]}")
+                    # Process R1 and R2 together
+                    r1_file = input_files[i]
+                    r2_file = input_files[i + 1]
+                    base_name = Path(r1_file).stem
+                    report_file = Path(output_dir) / f"{base_name}_kraken2.report"
+                    output_file = Path(output_dir) / f"{base_name}_kraken2.out"
+                    
+                    cmd = [
+                        "kraken2",
+                        "--db", kraken_db,
+                        "--output", str(output_file),
+                        "--report", str(report_file),
+                        "--threads", str(self.config.ncpus or 1)
+                    ]
+                    
+                    cmd.extend([r1_file, r2_file])
+                    self.logger.info(f"Kraken2 paired-end command: R1={r1_file}, R2={r2_file}")
+                    self.logger.info(f"Kraken2 full command: {' '.join(cmd)}")
+                    
+                    try:
+                        subprocess.run(cmd, check=True)
+                        self.logger.info(f"Kraken2 completed for paired files: {r1_file} and {r2_file}")
+                        
+                        # Parse Kraken2 report
+                        report_data = self._parse_kraken2_report(report_file)
+                        results[r1_file] = report_data
+                        
+                    except subprocess.CalledProcessError as e:
+                        self.logger.error(f"Kraken2 failed for paired files {r1_file} and {r2_file}: {e}")
+                        results[r1_file] = {"success": False, "error": str(e)}
                 else:
-                    cmd.append(input_file)
-                    self.logger.warning(f"Kraken2 paired mode but only 1 file available: {input_file}")
-            elif not paired:
+                    # Handle odd number of files (shouldn't happen with proper paired input)
+                    self.logger.warning(f"Kraken2 paired mode but odd number of files. Skipping: {input_files[i]}")
+        else:
+            # For single-end, process each file individually
+            for input_file in input_files:
+                base_name = Path(input_file).stem
+                report_file = Path(output_dir) / f"{base_name}_kraken2.report"
+                output_file = Path(output_dir) / f"{base_name}_kraken2.out"
+                
+                cmd = [
+                    "kraken2",
+                    "--db", kraken_db,
+                    "--output", str(output_file),
+                    "--report", str(report_file),
+                    "--threads", str(self.config.ncpus or 1)
+                ]
+                
                 cmd.append(input_file)
                 self.logger.info(f"Kraken2 single-end command: {input_file}")
-            
-            self.logger.info(f"Kraken2 full command: {' '.join(cmd)}")
-            
-            try:
-                subprocess.run(cmd, check=True)
-                if paired and i % 2 == 0 and i + 1 < len(input_files):
-                    self.logger.info(f"Kraken2 completed for paired files: {input_file} and {input_files[i + 1]}")
-                else:
+                self.logger.info(f"Kraken2 full command: {' '.join(cmd)}")
+                
+                try:
+                    subprocess.run(cmd, check=True)
                     self.logger.info(f"Kraken2 completed for {input_file}")
-                
-                # Parse Kraken2 report
-                report_data = self._parse_kraken2_report(report_file)
-                results[input_file] = report_data
-                
-            except subprocess.CalledProcessError as e:
-                self.logger.error(f"Kraken2 failed for {input_file}: {e}")
-                results[input_file] = {"success": False, "error": str(e)}
+                    
+                    # Parse Kraken2 report
+                    report_data = self._parse_kraken2_report(report_file)
+                    results[input_file] = report_data
+                    
+                except subprocess.CalledProcessError as e:
+                    self.logger.error(f"Kraken2 failed for {input_file}: {e}")
+                    results[input_file] = {"success": False, "error": str(e)}
         
         return {"success": True, "results": results}
     
@@ -137,7 +163,7 @@ class TaxonomicClassifier:
         
         krona_html = Path(output_dir) / "taxonomy_krona.html"
         
-        cmd = ["ktImportTaxonomy", "-o", str(krona_html), "-t", "5", "-m", "3"]
+        cmd = ["ktImportTaxonomy", "-t", "5", "-m", "3", "-o", str(krona_html), ]
         cmd.extend(kraken_files)
         
         try:
@@ -146,6 +172,12 @@ class TaxonomicClassifier:
             return str(krona_html)
         except subprocess.CalledProcessError as e:
             self.logger.error(f"Krona visualization failed: {e}")
+            # Check if it's a taxonomy database issue
+            if "Taxonomy not found" in str(e):
+                self.logger.warning("Krona taxonomy database not found. To fix this, run: updateTaxonomy.sh")
+                self.logger.info("Krona visualization skipped due to missing taxonomy database")
+            else:
+                self.logger.error(f"Krona visualization failed with error: {e}")
             return None
     
     def _parse_kraken2_report(self, report_file: Path) -> Dict[str, Any]:

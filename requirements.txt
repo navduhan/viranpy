@@ -5,6 +5,7 @@ numpy>=1.21.0
 matplotlib>=3.5.0
 seaborn>=0.11.0
 tqdm
+psutil>=5.8.0
 
 # Optional: For enhanced reporting (if available)
 # plotly>=5.0.0  # For interactive plots in HTML reports 

@@ -11,6 +11,7 @@ import subprocess
 import shutil
 from typing import Dict, Any, List, Optional
 from pathlib import Path
+import psutil
 
 from Bio import SeqIO
 from ..utils.file_utils import cmd_exists
@@ -30,7 +31,7 @@ class Assembler:
     def __init__(self, config, logger=None):
         """Initialize the assembler."""
         self.config = config
-        self.logger = logger
+        self.logger = logger or config.logger
         self.assembly_results = {}
     
     def check_dependencies(self) -> bool:
@@ -41,6 +42,48 @@ class Assembler:
             self.logger.error(f"Missing required tools: {', '.join(missing_tools)}")
             return False
         return True
+    
+    def _get_system_memory_gb(self) -> float:
+        """Get system memory in GB."""
+        try:
+            memory_bytes = psutil.virtual_memory().total
+            memory_gb = memory_bytes / (1024**3)
+            return memory_gb
+        except Exception:
+            # Fallback to a conservative default
+            return 8.0
+    
+    def _get_megahit_memory_bytes(self) -> int:
+        """Get MEGAHIT memory in bytes based on system capacity."""
+        system_memory_gb = self._get_system_memory_gb()
+        
+        # If user specified memory, use that
+        if hasattr(self.config, 'memory') and self.config.memory:
+            try:
+                # Parse memory string (e.g., "16G", "8GB", "16384M")
+                memory_str = str(self.config.memory).upper()
+                if memory_str.endswith('G') or memory_str.endswith('GB'):
+                    memory_gb = float(memory_str.rstrip('GB'))
+                elif memory_str.endswith('M') or memory_str.endswith('MB'):
+                    memory_gb = float(memory_str.rstrip('MB')) / 1024
+                else:
+                    # Assume it's already in GB
+                    memory_gb = float(memory_str)
+                return int(memory_gb * (1024**3))
+            except (ValueError, AttributeError):
+                self.logger.warning(f"Invalid memory format: {self.config.memory}. Using system-based default.")
+        
+        # Default logic based on system memory
+        if system_memory_gb >= 16:
+            # For systems with 16GB+, use 16GB for MEGAHIT
+            default_memory_gb = 16
+        else:
+            # For smaller systems, use 75% of available memory
+            default_memory_gb = max(4, system_memory_gb * 0.75)
+        
+        memory_bytes = int(default_memory_gb * (1024**3))
+        self.logger.info(f"System memory: {system_memory_gb:.1f}GB, MEGAHIT memory: {default_memory_gb:.1f}GB ({memory_bytes:,} bytes)")
+        return memory_bytes
     
     def run_spades(self, input_files: List[str], paired: bool = False, 
                    output_dir: str = "spades_assembly") -> Dict[str, Any]:
@@ -123,14 +166,36 @@ class Assembler:
         
         # Debug logging
         self.logger.info(f"MEGAHIT input files: {input_files}")
+        self.logger.info(f"MEGAHIT input files type: {type(input_files)}")
+        self.logger.info(f"MEGAHIT input files length: {len(input_files)}")
         self.logger.info(f"MEGAHIT paired mode: {paired}")
         self.logger.info(f"MEGAHIT number of input files: {len(input_files)}")
+        
+        # Check if input_files is actually a list and has content
+        if not isinstance(input_files, list):
+            self.logger.error(f"MEGAHIT input_files is not a list: {type(input_files)}")
+            return {"success": False, "error": "input_files must be a list"}
+        
+        if len(input_files) == 0:
+            self.logger.error("MEGAHIT input_files is empty")
+            return {"success": False, "error": "No input files provided"}
+        
+        if len(input_files) == 1:
+            self.logger.warning(f"MEGAHIT only one file provided: {input_files[0]}")
+            if paired:
+                self.logger.warning("MEGAHIT paired mode enabled but only one file provided")
         
         cmd = [
             "megahit",
             "-o", output_dir,
-            "-t", str(self.config.ncpus or 1)
+            "-t", str(self.config.ncpus or 1),
+            "-m", str(self._get_megahit_memory_bytes())
         ]
+        
+        # Debug logging for memory
+        memory_bytes = self._get_megahit_memory_bytes()
+        memory_gb = memory_bytes / (1024**3)
+        self.logger.info(f"MEGAHIT memory setting: {memory_gb:.1f}GB ({memory_bytes:,} bytes)")
         
         if paired:
             if len(input_files) >= 2:
