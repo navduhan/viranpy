@@ -124,7 +124,7 @@ class TaxonomicClassifier:
         
         krona_html = Path(output_dir) / "taxonomy_krona.html"
         
-        cmd = ["ktImportTaxonomy", "-o", str(krona_html)]
+        cmd = ["ktImportTaxonomy", "-o", str(krona_html), "-t", "5", "-m", "3"]
         cmd.extend(kraken_files)
         
         try:

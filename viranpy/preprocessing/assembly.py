@@ -59,6 +59,11 @@ class Assembler:
         output_dir = os.path.join(self.config.root_output, output_dir)
         os.makedirs(output_dir, exist_ok=True)
         
+        # Debug logging
+        self.logger.info(f"SPAdes input files: {input_files}")
+        self.logger.info(f"SPAdes paired mode: {paired}")
+        self.logger.info(f"SPAdes number of input files: {len(input_files)}")
+        
         cmd = [
             "spades.py",
             "--meta",
@@ -70,10 +75,15 @@ class Assembler:
         if paired:
             if len(input_files) >= 2:
                 cmd.extend(["-1", input_files[0], "-2", input_files[1]])
+                self.logger.info(f"SPAdes paired-end command: R1={input_files[0]}, R2={input_files[1]}")
             else:
                 cmd.extend(["-s", input_files[0]])
+                self.logger.warning(f"SPAdes paired mode but only 1 file provided: {input_files[0]}")
         else:
             cmd.extend(["-s", input_files[0]])
+            self.logger.info(f"SPAdes single-end command: {input_files[0]}")
+        
+        self.logger.info(f"SPAdes full command: {' '.join(cmd)}")
         
         try:
             subprocess.run(cmd, check=True)
@@ -110,6 +120,12 @@ class Assembler:
             self.logger.warning(f"MEGAHIT output directory {output_dir} already exists. Deleting it to avoid MEGAHIT error.")
             shutil.rmtree(output_dir)
         # Do NOT pre-create output_dir for MEGAHIT
+        
+        # Debug logging
+        self.logger.info(f"MEGAHIT input files: {input_files}")
+        self.logger.info(f"MEGAHIT paired mode: {paired}")
+        self.logger.info(f"MEGAHIT number of input files: {len(input_files)}")
+        
         cmd = [
             "megahit",
             "-o", output_dir,
@@ -119,10 +135,15 @@ class Assembler:
         if paired:
             if len(input_files) >= 2:
                 cmd.extend(["-1", input_files[0], "-2", input_files[1]])
+                self.logger.info(f"MEGAHIT paired-end command: R1={input_files[0]}, R2={input_files[1]}")
             else:
                 cmd.extend(["-r", input_files[0]])
+                self.logger.warning(f"MEGAHIT paired mode but only 1 file provided: {input_files[0]}")
         else:
             cmd.extend(["-r", input_files[0]])
+            self.logger.info(f"MEGAHIT single-end command: {input_files[0]}")
+        
+        self.logger.info(f"MEGAHIT full command: {' '.join(cmd)}")
         
         try:
             subprocess.run(cmd, check=True)
