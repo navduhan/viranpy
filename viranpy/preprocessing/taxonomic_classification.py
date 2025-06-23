@@ -56,6 +56,11 @@ class TaxonomicClassifier:
         output_dir = os.path.join(self.config.root_output, output_dir)
         os.makedirs(output_dir, exist_ok=True)
         
+        # Debug logging
+        self.logger.info(f"Kraken2 input files: {input_files}")
+        self.logger.info(f"Kraken2 paired mode: {paired}")
+        self.logger.info(f"Kraken2 number of input files: {len(input_files)}")
+        
         kraken_db = getattr(self.config, 'kraken2_db', None)
         if not kraken_db:
             self.logger.error("Kraken2 database not specified")
@@ -80,14 +85,22 @@ class TaxonomicClassifier:
                 # For paired reads, process both files together
                 if i + 1 < len(input_files):
                     cmd.extend([input_file, input_files[i + 1]])
+                    self.logger.info(f"Kraken2 paired-end command: R1={input_file}, R2={input_files[i + 1]}")
                 else:
                     cmd.append(input_file)
+                    self.logger.warning(f"Kraken2 paired mode but only 1 file available: {input_file}")
             elif not paired:
                 cmd.append(input_file)
+                self.logger.info(f"Kraken2 single-end command: {input_file}")
+            
+            self.logger.info(f"Kraken2 full command: {' '.join(cmd)}")
             
             try:
                 subprocess.run(cmd, check=True)
-                self.logger.info(f"Kraken2 completed for {input_file}")
+                if paired and i % 2 == 0 and i + 1 < len(input_files):
+                    self.logger.info(f"Kraken2 completed for paired files: {input_file} and {input_files[i + 1]}")
+                else:
+                    self.logger.info(f"Kraken2 completed for {input_file}")
                 
                 # Parse Kraken2 report
                 report_data = self._parse_kraken2_report(report_file)

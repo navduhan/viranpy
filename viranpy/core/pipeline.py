@@ -231,12 +231,20 @@ class ViralAnnotationPipeline:
             with PipelineLogger("Assembly Pipeline", self.logger):
                 results = {}
                 
+                # Debug logging
+                self.logger.info(f"Pipeline assembly input files: {read_files}")
+                self.logger.info(f"Pipeline assembly paired flag: {paired}")
+                self.logger.info(f"Pipeline assembly number of files: {len(read_files)}")
+                
                 # Check dependencies
                 if not self.assembler.check_dependencies():
                     raise RuntimeError("Assembly dependencies not available")
                 
                 # Use trimmed files if available, otherwise use input files
                 input_files = self.trimmed_files if self.trimmed_files else read_files
+                
+                self.logger.info(f"Pipeline assembly final input files: {input_files}")
+                self.logger.info(f"Pipeline assembly using trimmed files: {self.trimmed_files is not None}")
                 
                 # Run assembly based on method
                 assembler_method = getattr(self.config, 'assembler', 'hybrid')
@@ -302,6 +310,11 @@ class ViralAnnotationPipeline:
         """
         try:
             with PipelineLogger("Preprocessing Pipeline", self.logger):
+                # Debug logging
+                self.logger.info(f"Preprocessing pipeline input files: {read_files}")
+                self.logger.info(f"Preprocessing pipeline paired flag: {paired}")
+                self.logger.info(f"Preprocessing pipeline number of files: {len(read_files)}")
+                
                 results = {}
                 # Step 1: Quality control
                 if self.resume and self.pipeline_state.get('quality_control', {}).get('success'):
