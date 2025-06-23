@@ -561,23 +561,22 @@ class DatabaseManager:
         Returns:
             Dictionary with database status
         """
+        # For refseq_viral and krona_taxonomy, do not check for a directory
+        if db_name == 'refseq_viral':
+            return self._check_refseq_viral(None, db_info, fix_missing=fix_missing)
+        if db_name == 'krona_taxonomy':
+            return self._check_krona_taxonomy(db_info)
         db_dir = self.databases_dir / db_name
-        
         if not db_dir.exists():
             return {
                 'ready': False,
                 'message': 'Database directory not found'
             }
-        
         # Check specific database files
         if db_name == 'rfam':
             return self._check_rfam(db_dir, db_info, fix_missing=fix_missing)
-        elif db_name == 'refseq_viral':
-            return self._check_refseq_viral(db_dir, db_info, fix_missing=fix_missing)
         elif db_name == 'kraken2_viral':
             return self._check_kraken2_viral(db_dir, db_info, fix_missing=fix_missing)
-        elif db_name == 'krona_taxonomy':
-            return self._check_krona_taxonomy(db_info)
         elif db_name in ['rvdb', 'vogs', 'vfam', 'phrogs']:
             return self._check_hmmer_db(db_dir, db_info, fix_missing=fix_missing)
         else:
@@ -633,6 +632,7 @@ class DatabaseManager:
     
     def _check_refseq_viral(self, db_dir: Path, db_info: Dict[str, Any], fix_missing: bool = False) -> Dict[str, Any]:
         """Check RefSeq Viral database."""
+        # db_dir may be None, so always use self.databases_dir
         diamond_dir = self.databases_dir / "RefSeq_Viral_DIAMOND"
         blast_dir = self.databases_dir / "RefSeq_Viral_BLAST"
         # Check if both directories exist
