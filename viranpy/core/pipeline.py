@@ -11,6 +11,7 @@ import glob
 from typing import List, Dict, Any, Optional
 from pathlib import Path
 import logging
+import json
 
 from ..config import PipelineConfig
 from ..utils.logger import PipelineLogger, logger
@@ -37,13 +38,14 @@ class ViralAnnotationPipeline:
     - Output file generation
     """
     
-    def __init__(self, config: PipelineConfig, logger_instance: Optional[logging.Logger] = None):
+    def __init__(self, config: PipelineConfig, logger_instance: Optional[logging.Logger] = None, resume: bool = False):
         """
         Initialize the pipeline.
         
         Args:
             config: Pipeline configuration
             logger_instance: Logger instance
+            resume: Whether to resume from a previous state
         """
         self.config = config
         self.logger = logger_instance or logger
@@ -72,6 +74,10 @@ class ViralAnnotationPipeline:
         self.filtered_files = []
         self.assembly_results = {}
         self.final_assembly_file = None
+        
+        self.resume = resume
+        self.state_file = os.path.join(getattr(config, 'root_output', 'viranpy_results'), 'pipeline_state.json')
+        self.pipeline_state = self._load_state() if resume else {}
         
     def add_annotator(self, annotator: BaseAnnotator) -> None:
         """
@@ -297,63 +303,123 @@ class ViralAnnotationPipeline:
         try:
             with PipelineLogger("Preprocessing Pipeline", self.logger):
                 results = {}
-                # Step 1: Quality control (always run unless --skip-qc)
-                if not getattr(self.config, 'skip_qc', False):
+                # Step 1: Quality control
+                if self.resume and self.pipeline_state.get('quality_control', {}).get('success'):
+                    self.logger.info("[RESUME] Skipping quality control (already completed)")
+                    qc_results = self.pipeline_state['quality_control']['results']
+                elif not getattr(self.config, 'skip_qc', False):
                     self.logger.info("Step 1: Quality control")
                     qc_results = self.run_quality_control(read_files, paired)
-                    results['quality_control'] = qc_results
+                    self.pipeline_state['quality_control'] = {'success': True, 'results': qc_results}
+                    self._save_state()
                 else:
                     self.logger.info("Skipping quality control (--skip-qc)")
-                # Step 2: Taxonomic classification of raw reads (optional, unless --skip-taxonomy)
-                if not getattr(self.config, 'skip_taxonomy', False) and getattr(self.config, 'taxonomy_raw_reads', True):
+                    qc_results = None
+                results['quality_control'] = qc_results
+                # Step 2: Taxonomic classification of raw reads
+                if self.resume and self.pipeline_state.get('raw_reads_taxonomy', {}).get('success'):
+                    self.logger.info("[RESUME] Skipping raw reads taxonomy (already completed)")
+                    taxonomy_results = self.pipeline_state['raw_reads_taxonomy']['results']
+                elif not getattr(self.config, 'skip_taxonomy', False) and getattr(self.config, 'taxonomy_raw_reads', True):
                     self.logger.info("Step 2: Taxonomic classification of raw reads")
                     taxonomy_results = self._run_raw_reads_taxonomy(read_files, paired)
-                    results['raw_reads_taxonomy'] = taxonomy_results
+                    self.pipeline_state['raw_reads_taxonomy'] = {'success': True, 'results': taxonomy_results}
+                    self._save_state()
                 else:
                     self.logger.info("Skipping raw reads taxonomy (--skip-taxonomy or not requested)")
-                # Step 3: Host removal (run if possible, unless --skip-host-removal)
-                if not getattr(self.config, 'skip_host_removal', False):
+                    taxonomy_results = None
+                results['raw_reads_taxonomy'] = taxonomy_results
+                # Step 3: Host removal
+                if self.resume and self.pipeline_state.get('host_removal', {}).get('success'):
+                    self.logger.info("[RESUME] Skipping host removal (already completed)")
+                    host_results = self.pipeline_state['host_removal']['results']
+                elif not getattr(self.config, 'skip_host_removal', False):
                     self.logger.info("Step 3: Host removal using Bowtie2")
                     host_results = self._run_host_removal(read_files, paired)
-                    results['host_removal'] = host_results
+                    self.pipeline_state['host_removal'] = {'success': True, 'results': host_results}
+                    self._save_state()
                 else:
                     self.logger.info("Skipping host removal (--skip-host-removal)")
                     self.filtered_files = self.trimmed_files if self.trimmed_files else read_files
-                # Step 4: Assembly (always run)
-                self.logger.info("Step 4: Assembly")
-                assembly_results = self.run_assembly(self.filtered_files, paired)
+                    host_results = None
+                results['host_removal'] = host_results
+                # Step 4: Assembly
+                if self.resume and self.pipeline_state.get('assembly', {}).get('success'):
+                    self.logger.info("[RESUME] Skipping assembly (already completed)")
+                    assembly_results = self.pipeline_state['assembly']['results']
+                else:
+                    self.logger.info("Step 4: Assembly")
+                    assembly_results = self.run_assembly(self.filtered_files, paired)
+                    self.pipeline_state['assembly'] = {'success': True, 'results': assembly_results}
+                    self._save_state()
                 results['assembly'] = assembly_results
-                # Step 5: Taxonomic classification of contigs (unless --skip-taxonomy)
-                if not getattr(self.config, 'skip_taxonomy', False) and getattr(self.config, 'taxonomy_contigs', True):
+                # Step 5: Taxonomic classification of contigs
+                if self.resume and self.pipeline_state.get('contigs_taxonomy', {}).get('success'):
+                    self.logger.info("[RESUME] Skipping contigs taxonomy (already completed)")
+                    contigs_taxonomy_results = self.pipeline_state['contigs_taxonomy']['results']
+                elif not getattr(self.config, 'skip_taxonomy', False) and getattr(self.config, 'taxonomy_contigs', True):
                     if self.final_assembly_file:
                         self.logger.info("Step 5: Taxonomic classification of contigs")
                         contigs_taxonomy_results = self._run_contigs_taxonomy(self.final_assembly_file)
-                        results['contigs_taxonomy'] = contigs_taxonomy_results
+                        self.pipeline_state['contigs_taxonomy'] = {'success': True, 'results': contigs_taxonomy_results}
+                        self._save_state()
+                    else:
+                        contigs_taxonomy_results = None
                 else:
                     self.logger.info("Skipping contigs taxonomy (--skip-taxonomy or not requested)")
-                # Step 6: Coverage analysis (unless --skip-coverage)
-                if not getattr(self.config, 'skip_coverage', False):
-                    # Placeholder: implement coverage analysis if not already present
+                    contigs_taxonomy_results = None
+                results['contigs_taxonomy'] = contigs_taxonomy_results
+                # Step 6: Coverage analysis
+                if self.resume and self.pipeline_state.get('coverage', {}).get('success'):
+                    self.logger.info("[RESUME] Skipping coverage analysis (already completed)")
+                    coverage_results = self.pipeline_state['coverage']['results']
+                elif not getattr(self.config, 'skip_coverage', False):
                     self.logger.info("Step 6: Coverage analysis (if implemented)")
-                    # results['coverage'] = ...
+                    # Placeholder: implement coverage analysis if not already present
+                    coverage_results = None
+                    # self.pipeline_state['coverage'] = {'success': True, 'results': coverage_results}
+                    # self._save_state()
                 else:
                     self.logger.info("Skipping coverage analysis (--skip-coverage)")
-                # Step 7: QUAST analysis (unless --skip-quast)
-                if not getattr(self.config, 'skip_quast', False):
-                    # Placeholder: implement QUAST analysis if not already present
+                    coverage_results = None
+                results['coverage'] = coverage_results
+                # Step 7: QUAST analysis
+                if self.resume and self.pipeline_state.get('quast', {}).get('success'):
+                    self.logger.info("[RESUME] Skipping QUAST analysis (already completed)")
+                    quast_results = self.pipeline_state['quast']['results']
+                elif not getattr(self.config, 'skip_quast', False):
                     self.logger.info("Step 7: QUAST analysis (if implemented)")
-                    # results['quast'] = ...
+                    quast_results = None
+                    # self.pipeline_state['quast'] = {'success': True, 'results': quast_results}
+                    # self._save_state()
                 else:
                     self.logger.info("Skipping QUAST analysis (--skip-quast)")
-                # Step 8: Comprehensive reporting (unless --skip-report)
-                if not getattr(self.config, 'skip_report', False):
+                    quast_results = None
+                results['quast'] = quast_results
+                # Step 8: Comprehensive reporting
+                if self.resume and self.pipeline_state.get('preprocessing_report', {}).get('success'):
+                    self.logger.info("[RESUME] Skipping comprehensive report (already completed)")
+                    preprocessing_report = self.pipeline_state['preprocessing_report']['results']
+                elif not getattr(self.config, 'skip_report', False):
                     preprocessing_report = self._generate_preprocessing_report(results)
-                    results['preprocessing_report'] = preprocessing_report
+                    self.pipeline_state['preprocessing_report'] = {'success': True, 'results': preprocessing_report}
+                    self._save_state()
                 else:
                     self.logger.info("Skipping comprehensive report (--skip-report)")
+                    preprocessing_report = None
+                results['preprocessing_report'] = preprocessing_report
                 self.logger.info("Preprocessing pipeline completed successfully")
                 return results
         except Exception as e:
+            # Mark the current step as failed
+            step = None
+            for k in ['quality_control', 'raw_reads_taxonomy', 'host_removal', 'assembly', 'contigs_taxonomy', 'coverage', 'quast', 'preprocessing_report']:
+                if k not in self.pipeline_state or not self.pipeline_state[k].get('success'):
+                    step = k
+                    break
+            if step:
+                self.pipeline_state[step] = {'success': False, 'error': str(e)}
+                self._save_state()
             self.logger.error(f"Preprocessing pipeline failed: {e}")
             raise
     
@@ -887,4 +953,15 @@ class ViralAnnotationPipeline:
                 self.result.annotations["taxonomic_classification"] = result.annotations
                 self.result.output_files.update(result.output_files)
             else:
-                self.logger.warning(f"Taxonomic classification failed: {result.error_message}") 
+                self.logger.warning(f"Taxonomic classification failed: {result.error_message}")
+    
+    def _save_state(self):
+        os.makedirs(os.path.dirname(self.state_file), exist_ok=True)
+        with open(self.state_file, 'w') as f:
+            json.dump(self.pipeline_state, f, indent=2)
+
+    def _load_state(self):
+        if os.path.exists(self.state_file):
+            with open(self.state_file, 'r') as f:
+                return json.load(f)
+        return {} 

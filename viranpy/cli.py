@@ -256,7 +256,7 @@ Examples:
     )
     assembly_group.add_argument(
         "--spades-memory", dest="spades_memory", type=int, default=16,
-        help='SPAdes memory limit in GB (Default: 16)', metavar="INT"
+        help='SPAdes memory limit in GB (Default: 16). Use --memory for other tools if needed.', metavar="INT"
     )
     assembly_group.add_argument(
         "--cdhit-identity", dest="cdhit_identity", type=float, default=0.95,
@@ -279,7 +279,7 @@ Examples:
     )
     advanced_general_group.add_argument(
         "--threads", dest="ncpus", type=int, default=os.cpu_count(),
-        help='Number of threads/cpus (Default: all available)', metavar="INT"
+        help='Number of threads/CPUs to use for all steps (Default: all available)', metavar="INT"
     )
     advanced_general_group.add_argument(
         "--mincontigsize", dest="min_contig_size", type=int, default=200,
@@ -288,6 +288,10 @@ Examples:
     advanced_general_group.add_argument(
         "--blast", dest="blast_switch", action='store_true', default=False,
         help='Using BLAST to predict protein function based on homology (Default: False)'
+    )
+    advanced_general_group.add_argument(
+        "--memory", dest="memory", type=int, default=None,
+        help='General memory limit in GB for tools that support it (Default: tool-specific or system default)', metavar="INT"
     )
     
     # Advanced circularity options
@@ -426,6 +430,13 @@ Examples:
         help='HMMER Coverage threshold (Default: 50.0)', metavar="FLOAT"
     )
     
+    # Resume option
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Resume the pipeline from the last successful step using the pipeline_state.json file."
+    )
+    
     return parser
 
 
@@ -459,7 +470,13 @@ def parse_args(args: Optional[list] = None) -> argparse.Namespace:
             parser.error("Cannot use --reads with --pe1/--pe2 or --single options")
         
         if parsed_args.pe1_file and parsed_args.pe2_file:
-            parsed_args.read_files = [parsed_args.pe1_file, parsed_args.pe2_file]
+            # Always order as [R1, R2] regardless of argument order
+            read1, read2 = parsed_args.pe1_file, parsed_args.pe2_file
+            # Try to detect if user swapped them (e.g., by filename)
+            if '2' in os.path.basename(read1) and '1' in os.path.basename(read2):
+                # Swap if user gave --pe1 as R2 and --pe2 as R1
+                read1, read2 = read2, read1
+            parsed_args.read_files = [read1, read2]
             parsed_args.paired = True
             parsed_args.single = False
         elif parsed_args.single_file:
@@ -531,6 +548,9 @@ def create_config_from_args(args: argparse.Namespace) -> PipelineConfig:
     for arg_name, arg_value in vars(args).items():
         if hasattr(config, arg_name):
             setattr(config, arg_name, arg_value)
+    
+    # Attach resume flag to config for pipeline usage
+    config.resume = getattr(args, 'resume', False)
     
     return config
 
@@ -681,7 +701,7 @@ def main(args: Optional[list] = None) -> int:
         config = create_config_from_args(parsed_args)
         
         # Create and run pipeline
-        pipeline = ViralAnnotationPipeline(config, logger)
+        pipeline = ViralAnnotationPipeline(config, logger_instance=logger, resume=getattr(config, 'resume', False))
         
         if parsed_args.qc_only:
             # Run quality control only
