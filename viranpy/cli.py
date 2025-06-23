@@ -90,7 +90,7 @@ Examples:
     workflow_group = parser.add_argument_group('Workflow options [REQUIRED]')
     workflow_group.add_argument(
         "--reads", dest="read_files", type=str, nargs='+',
-        help='Input FASTQ files for preprocessing and assembly. For paired-end: provide 2 files (R1.fastq R2.fastq). For single-end: provide 1 file.', metavar="FASTQFILES"
+        help='Input FASTQ files for preprocessing and assembly. For paired-end: provide 2 files in order (R1.fastq R2.fastq). For single-end: provide 1 file. Note: Use --pe1/--pe2 for explicit paired-end control.', metavar="FASTQFILES"
     )
     workflow_group.add_argument(
         "--pe1", dest="pe1_file", type=str,
@@ -470,13 +470,8 @@ def parse_args(args: Optional[list] = None) -> argparse.Namespace:
             parser.error("Cannot use --reads with --pe1/--pe2 or --single options")
         
         if parsed_args.pe1_file and parsed_args.pe2_file:
-            # Always order as [R1, R2] regardless of argument order
-            read1, read2 = parsed_args.pe1_file, parsed_args.pe2_file
-            # Try to detect if user swapped them (e.g., by filename)
-            if '2' in os.path.basename(read1) and '1' in os.path.basename(read2):
-                # Swap if user gave --pe1 as R2 and --pe2 as R1
-                read1, read2 = read2, read1
-            parsed_args.read_files = [read1, read2]
+            # Use --pe1 as R1 and --pe2 as R2 in that exact order
+            parsed_args.read_files = [parsed_args.pe1_file, parsed_args.pe2_file]
             parsed_args.paired = True
             parsed_args.single = False
         elif parsed_args.single_file:
@@ -494,6 +489,9 @@ def parse_args(args: Optional[list] = None) -> argparse.Namespace:
         elif len(parsed_args.read_files) == 2:
             parsed_args.paired = True
             parsed_args.single = False
+            # Warn about file order
+            print("[INFO] Using --reads with 2 files. Ensure files are in correct order: R1.fastq R2.fastq")
+            print("[INFO] For explicit control, consider using --pe1 R1.fastq --pe2 R2.fastq instead")
         else:
             parser.error("--reads must specify either 1 file (single-end) or 2 files (paired-end)")
     
