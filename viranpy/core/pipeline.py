@@ -250,12 +250,12 @@ class ViralAnnotationPipeline:
                         self.final_assembly_file = megahit_result.get('contigs_file')
                 
                 elif assembler_method == 'hybrid':
-                    self.logger.info("Running hybrid assembly (SPAdes + MEGAHIT)")
-                    spades_result = self.assembler.run_spades(input_files, paired)
+                    self.logger.info("Running hybrid assembly (MEGAHIT + SPAdes)")
                     megahit_result = self.assembler.run_megahit(input_files, paired)
+                    spades_result = self.assembler.run_spades(input_files, paired)
                     
-                    results['spades'] = spades_result
                     results['megahit'] = megahit_result
+                    results['spades'] = spades_result
                     
                     if spades_result.get('success') and megahit_result.get('success'):
                         self.logger.info("Creating hybrid assembly")

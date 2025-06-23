@@ -23,7 +23,7 @@
 ### 📊 Complete Metagenomic Pipeline
 - **Quality Control**: FastQC and Trim Galore for read quality assessment
 - **Host Removal**: Bowtie2-based host genome filtering
-- **Assembly**: SPAdes/MEGAHIT hybrid assembly optimized for viral genomes
+- **Assembly**: MEGAHIT/SPAdes hybrid assembly optimized for viral genomes
 - **Taxonomic Classification**: Kraken2 integration for viral taxonomy
 - **Coverage Analysis**: BWA/samtools-based coverage calculation
 - **Assembly Statistics**: QUAST integration for quality assessment
@@ -188,8 +188,8 @@ viranpy --input genome.fasta --viral-metadata viral_metadata.txt
 - **Output**: Host-free reads for assembly
 
 #### 3. Assembly
-- **SPAdes**: High-quality assembly
 - **MEGAHIT**: Fast metagenomic assembly
+- **SPAdes**: High-quality assembly
 - **CD-HIT**: Hybrid assembly with redundancy removal
 - **Statistics**: Contig counts, N50, GC content
 
@@ -328,7 +328,7 @@ html_report = reporter.generate_comprehensive_report(
 - **Samtools**: BAM file processing and coverage calculation
 - **QUAST**: Assembly quality assessment
 - **Bowtie2**: Host removal
-- **SPAdes/MEGAHIT**: Assembly
+- **MEGAHIT/SPAdes**: Assembly
 - **Kraken2**: Taxonomic classification
 - **Prodigal**: Gene prediction
 - **BLAST/DIAMOND**: Functional annotation
@@ -439,8 +439,7 @@ This project is licensed under the GPLv3 License - see the [LICENSE](https://git
 ViRAnPy integrates and builds upon several excellent bioinformatics tools and databases:
 
 ### Assembly and Quality Control
-- **SPAdes**: High-quality genome assembly
-- **MEGAHIT**: Fast metagenomic assembly
+- **MEGAHIT/SPAdes**: Assembly
 - **CD-HIT**: Sequence clustering and redundancy removal
 - **FastQC**: Read quality assessment
 - **Trim Galore**: Adapter trimming and quality filtering

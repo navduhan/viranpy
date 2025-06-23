@@ -58,7 +58,7 @@ viranpy --reads R1.fastq R2.fastq --viral-metadata viral_metadata.txt --assemble
 ViRAnPy automates every step of viral metagenomic analysis:
 - **Quality Control** (FastQC, Trim Galore)
 - **Host Removal** (Bowtie2)
-- **Assembly** (SPAdes, MEGAHIT)
+- **Assembly** (MEGAHIT, SPAdes, Hybrid)
 - **Taxonomic Classification** (Kraken2)
 - **Coverage Analysis** (BWA, samtools)
 - **Assembly Quality** (QUAST)
