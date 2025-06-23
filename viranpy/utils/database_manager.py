@@ -75,7 +75,6 @@ class DatabaseManager:
                 'type': 'krona',
                 'required_tools': ['ktUpdateTaxonomy.sh'],
                 'description': 'Krona taxonomy database for visualization',
-                'optional': True,
                 'conda_installed': True
             },
             'rvdb': {
@@ -635,8 +634,24 @@ class DatabaseManager:
     def _check_refseq_viral(self, db_dir: Path, db_info: Dict[str, Any], fix_missing: bool = False) -> Dict[str, Any]:
         """Check RefSeq Viral database."""
         diamond_dir = self.databases_dir / "RefSeq_Viral_DIAMOND"
-        diamond_db = diamond_dir / "refseq_viral_proteins.dmnd"
         blast_dir = self.databases_dir / "RefSeq_Viral_BLAST"
+        # Check if both directories exist
+        if not diamond_dir.exists() and not blast_dir.exists():
+            return {
+                'ready': False,
+                'message': 'Both RefSeq_Viral_DIAMOND and RefSeq_Viral_BLAST directories not found'
+            }
+        if not diamond_dir.exists():
+            return {
+                'ready': False,
+                'message': 'RefSeq_Viral_DIAMOND directory not found'
+            }
+        if not blast_dir.exists():
+            return {
+                'ready': False,
+                'message': 'RefSeq_Viral_BLAST directory not found'
+            }
+        diamond_db = diamond_dir / "refseq_viral_proteins.dmnd"
         essential_blast_files = [
             "refseq_viral_proteins.psq",
             "refseq_viral_proteins.phr",
