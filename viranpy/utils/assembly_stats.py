@@ -167,7 +167,6 @@ class AssemblyStatsCalculator:
         
         try:
             from Bio import SeqIO
-            from Bio.SeqUtils import GC
             
             contig_lengths = []
             gc_contents = []
@@ -176,16 +175,14 @@ class AssemblyStatsCalculator:
                 length = len(record.seq)
                 contig_lengths.append(length)
                 
-                # Safely calculate GC content with error handling
+                # Calculate GC content manually (avoid Bio.SeqUtils.GC for now)
+                gc_content = 0.0
                 try:
-                    # Convert sequence to string and ensure it's valid DNA
                     seq_str = str(record.seq).upper()
-                    # Remove any non-DNA characters
-                    seq_str = ''.join(c for c in seq_str if c in 'ATCGN')
-                    if seq_str:
-                        gc_content = GC(seq_str)
-                    else:
-                        gc_content = 0.0
+                    gc_count = seq_str.count('G') + seq_str.count('C')
+                    total_count = len(seq_str)
+                    if total_count > 0:
+                        gc_content = (gc_count / total_count) * 100
                 except Exception as gc_error:
                     self.logger.warning(f"Could not calculate GC content for contig {record.id}: {gc_error}")
                     gc_content = 0.0

@@ -147,7 +147,7 @@ class Assembler:
                 return {"success": False, "error": "No scaffolds or contigs file found"}
             
             # Rename contigs with descriptive headers
-            renamed_file = output_dir / "scaffolds_renamed.fasta" if scaffolds_file.exists() else output_dir / "contigs_renamed.fasta"
+            renamed_file = Path(output_dir) / ("scaffolds_renamed.fasta" if scaffolds_file.exists() else "contigs_renamed.fasta")
             self._rename_contigs_with_descriptive_headers(
                 str(assembly_file), 
                 str(renamed_file),
@@ -234,7 +234,7 @@ class Assembler:
             contigs_file = Path(output_dir) / "final.contigs.fa"
             if contigs_file.exists():
                 # Rename contigs with descriptive headers
-                renamed_file = output_dir / "contigs_renamed.fasta"
+                renamed_file = Path(output_dir) / "contigs_renamed.fasta"
                 self._rename_contigs_with_descriptive_headers(
                     str(contigs_file), 
                     str(renamed_file),
@@ -393,26 +393,39 @@ class Assembler:
             Path to the renamed output file
         """
         try:
-            from Bio.SeqUtils import GC
-            
             renamed_contigs = []
             contig_number = 1
             
+            # Check if input file exists and is readable
+            if not os.path.exists(input_file):
+                self.logger.error(f"Input file does not exist: {input_file}")
+                return input_file
+            
             for record in SeqIO.parse(input_file, "fasta"):
                 try:
-                    # Calculate contig properties
-                    length = len(record.seq)
+                    # Validate record
+                    if record is None or not hasattr(record, 'seq') or record.seq is None:
+                        self.logger.warning(f"Skipping invalid record: {record.id if hasattr(record, 'id') else 'unknown'}")
+                        continue
                     
-                    # Safely calculate GC content with error handling
+                    # Calculate contig properties
                     try:
-                        # Convert sequence to string and ensure it's valid DNA
+                        length = len(record.seq)
+                        if length <= 0:
+                            self.logger.warning(f"Skipping contig with zero length: {record.id}")
+                            continue
+                    except Exception as len_error:
+                        self.logger.warning(f"Could not calculate length for contig {record.id}: {len_error}")
+                        length = 0
+                    
+                    # Calculate GC content manually (avoid Bio.SeqUtils.GC for now)
+                    gc_content = 0.0
+                    try:
                         seq_str = str(record.seq).upper()
-                        # Remove any non-DNA characters
-                        seq_str = ''.join(c for c in seq_str if c in 'ATCGN')
-                        if seq_str:
-                            gc_content = GC(seq_str)
-                        else:
-                            gc_content = 0.0
+                        gc_count = seq_str.count('G') + seq_str.count('C')
+                        total_count = len(seq_str)
+                        if total_count > 0:
+                            gc_content = (gc_count / total_count) * 100
                     except Exception as gc_error:
                         self.logger.warning(f"Could not calculate GC content for contig {record.id}: {gc_error}")
                         gc_content = 0.0
@@ -430,15 +443,20 @@ class Assembler:
                     contig_number += 1
                     
                 except Exception as record_error:
-                    self.logger.warning(f"Could not process contig {record.id}: {record_error}")
+                    self.logger.warning(f"Could not process contig {record.id if hasattr(record, 'id') else 'unknown'}: {record_error}")
                     # Skip this contig and continue with the next one
                     continue
             
             # Write renamed contigs
-            SeqIO.write(renamed_contigs, output_file, "fasta")
-            
-            self.logger.info(f"Renamed {len(renamed_contigs)} contigs with descriptive headers")
-            return output_file
+            if renamed_contigs:
+                SeqIO.write(renamed_contigs, output_file, "fasta")
+                self.logger.info(f"Renamed {len(renamed_contigs)} contigs with descriptive headers")
+                return output_file
+            else:
+                self.logger.warning("No contigs were successfully processed, copying original file")
+                import shutil
+                shutil.copy2(input_file, output_file)
+                return output_file
             
         except Exception as e:
             self.logger.error(f"Failed to rename contigs: {e}")
