@@ -61,7 +61,7 @@ class Assembler:
         if hasattr(self.config, 'memory') and self.config.memory:
             try:
                 # Parse memory string (e.g., "16G", "8GB", "16384M")
-                memory_str = str(self.config.memory).upper()
+                memory_str = str(self.config.memory).upper().strip()
                 if memory_str.endswith('G') or memory_str.endswith('GB'):
                     memory_gb = float(memory_str.rstrip('GB'))
                 elif memory_str.endswith('M') or memory_str.endswith('MB'):
@@ -70,8 +70,8 @@ class Assembler:
                     # Assume it's already in GB
                     memory_gb = float(memory_str)
                 return int(memory_gb * (1024**3))
-            except (ValueError, AttributeError):
-                self.logger.warning(f"Invalid memory format: {self.config.memory}. Using system-based default.")
+            except (ValueError, AttributeError) as e:
+                self.logger.warning(f"Invalid memory format: {self.config.memory}. Using system-based default. Error: {e}")
         
         # Default logic based on system memory
         if system_memory_gb >= 16:
@@ -399,21 +399,40 @@ class Assembler:
             contig_number = 1
             
             for record in SeqIO.parse(input_file, "fasta"):
-                # Calculate contig properties
-                length = len(record.seq)
-                gc_content = GC(record.seq)
-                
-                # Create descriptive header
-                new_id = f"viranpy_contig_{contig_number:06d}"
-                new_description = f"len={length}bp gc={gc_content:.1f}% method={assembly_method} orig_id={record.id}"
-                
-                # Create new record
-                new_record = record
-                new_record.id = new_id
-                new_record.description = new_description
-                renamed_contigs.append(new_record)
-                
-                contig_number += 1
+                try:
+                    # Calculate contig properties
+                    length = len(record.seq)
+                    
+                    # Safely calculate GC content with error handling
+                    try:
+                        # Convert sequence to string and ensure it's valid DNA
+                        seq_str = str(record.seq).upper()
+                        # Remove any non-DNA characters
+                        seq_str = ''.join(c for c in seq_str if c in 'ATCGN')
+                        if seq_str:
+                            gc_content = GC(seq_str)
+                        else:
+                            gc_content = 0.0
+                    except Exception as gc_error:
+                        self.logger.warning(f"Could not calculate GC content for contig {record.id}: {gc_error}")
+                        gc_content = 0.0
+                    
+                    # Create descriptive header
+                    new_id = f"viranpy_contig_{contig_number:06d}"
+                    new_description = f"len={length}bp gc={gc_content:.1f}% method={assembly_method} orig_id={record.id}"
+                    
+                    # Create new record
+                    new_record = record
+                    new_record.id = new_id
+                    new_record.description = new_description
+                    renamed_contigs.append(new_record)
+                    
+                    contig_number += 1
+                    
+                except Exception as record_error:
+                    self.logger.warning(f"Could not process contig {record.id}: {record_error}")
+                    # Skip this contig and continue with the next one
+                    continue
             
             # Write renamed contigs
             SeqIO.write(renamed_contigs, output_file, "fasta")

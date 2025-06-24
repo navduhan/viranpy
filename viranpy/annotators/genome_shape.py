@@ -138,7 +138,9 @@ def calculate_gc_skew(name: str, length: int, seq: str, gc_skew_window: int, gc_
     cs = 0
     for i, m in gmc[0::gc_skew_slide]:
         p = gpc[i][1]
-        gcs = m/p if p != 0 else 0
+        m_val = float(m) if isinstance(m, (int, float, str)) else 0.0
+        p_val = float(p) if isinstance(p, (int, float, str)) else 0.0
+        gcs = m_val / p_val if p_val != 0 else 0
         cs += gcs
         skew[0].append(i)
         c_skew[0].append(i)

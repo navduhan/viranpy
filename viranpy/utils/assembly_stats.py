@@ -175,7 +175,22 @@ class AssemblyStatsCalculator:
             for record in SeqIO.parse(contigs_file, "fasta"):
                 length = len(record.seq)
                 contig_lengths.append(length)
-                gc_contents.append(GC(record.seq))
+                
+                # Safely calculate GC content with error handling
+                try:
+                    # Convert sequence to string and ensure it's valid DNA
+                    seq_str = str(record.seq).upper()
+                    # Remove any non-DNA characters
+                    seq_str = ''.join(c for c in seq_str if c in 'ATCGN')
+                    if seq_str:
+                        gc_content = GC(seq_str)
+                    else:
+                        gc_content = 0.0
+                except Exception as gc_error:
+                    self.logger.warning(f"Could not calculate GC content for contig {record.id}: {gc_error}")
+                    gc_content = 0.0
+                
+                gc_contents.append(gc_content)
                 viral_stats["total_bases"] += length
             
             viral_stats["total_contigs"] = len(contig_lengths)
