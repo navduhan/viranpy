@@ -32,15 +32,15 @@ class ViralProteinAnnotator(BaseAnnotator):
         super().__init__(config, logger)
         self.protein_annotations = {}
         self.protein_results = {}
-
+    
     def check_dependencies(self) -> bool:
         """Check if required tools are available."""
         return cmd_exists("diamond") or cmd_exists("blastp")
-
+    
     def validate_input(self, input_file: str) -> bool:
         """Validate input FASTA file."""
         return Path(input_file).exists() and Path(input_file).suffix.lower() in ['.fasta', '.fa', '.faa']
-
+    
     def run(self, input_file: str, **kwargs) -> Dict[str, Any]:
         """
         Run protein function annotation for all sequences in the input file.
@@ -64,14 +64,14 @@ class ViralProteinAnnotator(BaseAnnotator):
             result.error_message = str(e)
             self.logger.error(f"Protein function annotation failed: {e}")
         return result.to_dict()
-
+    
     def _run_homology_search(self, input_file: str) -> None:
         """Run BLAST or DIAMOND for protein homology search."""
         if getattr(self.config, 'blast_switch', False):
             self._run_blast_search(input_file)
         else:
             self._run_diamond_search(input_file)
-
+    
     def _run_blast_search(self, input_file: str) -> None:
         """Run BLAST homology search."""
         blast_db = getattr(self.config, 'blast_database', None)
@@ -79,17 +79,17 @@ class ViralProteinAnnotator(BaseAnnotator):
         ncpus = getattr(self.config, 'ncpus', 1)
         exhaustive = getattr(self.config, 'blast_exh', False)
         output_file = f"{input_file}.blast.csv"
-        cmd = [
-            'blastp', '-query', input_file, '-db', blast_db,
-            '-evalue', str(blast_evalue),
-            '-outfmt', '6 qseqid sseqid pident length qlen slen qstart qend evalue bitscore stitle',
+                    cmd = [
+                        'blastp', '-query', input_file, '-db', blast_db,
+                        '-evalue', str(blast_evalue),
+                        '-outfmt', '6 qseqid sseqid pident length qlen slen qstart qend evalue bitscore stitle',
             '-out', output_file, '-num_threads', str(ncpus)
         ]
         if exhaustive:
             cmd += ['-word_size', '2', '-gapopen', '8', '-gapextend', '2', '-matrix', 'PAM70', '-comp_based_stats', '0']
         safe_run_cmd(cmd, self.logger)
         self.protein_annotations = self._parse_homology_results(
-            output_file,
+            output_file, 
             getattr(self.config, 'blast_width_threshold', 50.0),
             getattr(self.config, 'blast_cov_threshold', 50.0),
             blast_evalue,
@@ -97,20 +97,20 @@ class ViralProteinAnnotator(BaseAnnotator):
         )
         if os.path.exists(output_file):
             os.remove(output_file)
-
+    
     def _run_diamond_search(self, input_file: str) -> None:
         """Run DIAMOND homology search."""
         diamond_db = getattr(self.config, 'diamond_database', None)
         diamond_evalue = getattr(self.config, 'diamond_evalue', 0.00001)
         ncpus = getattr(self.config, 'ncpus', 1)
         output_file = f"{input_file}.diamond.csv"
-        cmd = [
-            'diamond', 'blastp', '-q', input_file, '-d', diamond_db,
-            '-e', str(diamond_evalue), '-f', '6', 'qseqid', 'sseqid',
-            'pident', 'length', 'qlen', 'slen', 'qstart', 'qend',
-            'evalue', 'bitscore', 'stitle', '-o', output_file,
+                cmd = [
+                    'diamond', 'blastp', '-q', input_file, '-d', diamond_db,
+                    '-e', str(diamond_evalue), '-f', '6', 'qseqid', 'sseqid',
+                    'pident', 'length', 'qlen', 'slen', 'qstart', 'qend',
+                    'evalue', 'bitscore', 'stitle', '-o', output_file,
             '-p', str(ncpus), '--quiet'
-        ]
+                ]
         safe_run_cmd(cmd, self.logger)
         self.protein_annotations = self._parse_homology_results(
             output_file,
@@ -121,7 +121,7 @@ class ViralProteinAnnotator(BaseAnnotator):
         )
         if os.path.exists(output_file):
             os.remove(output_file)
-
+    
     def _parse_homology_results(self, file_path: str, threshold_width: float, threshold_cov: float, threshold_evalue: float, program: str) -> Dict[str, Any]:
         """
         Parse BLAST or DIAMOND results for protein annotation.
@@ -129,7 +129,7 @@ class ViralProteinAnnotator(BaseAnnotator):
         hypotheticalpat = re.compile(r'(?i)(((hypothetical|uncharacteri[z|s]ed|predicted)( phage)?( membrane)? protein)|(ORF|(unnamed protein product|gp\d+|protein of unknown function|phage protein)))')
         annotations = {}
         with open(file_path, "r") as results:
-            reader = csv.DictReader(results, delimiter='\t',
+            reader = csv.DictReader(results, delimiter='\t', 
                                   fieldnames=['qseqid','sseqid','pident','length','qlen','slen','qstart','qend','evalue','bitscore','stitle'])
             for row in reader:
                 perc_cover = round(100.00 * (float(row['length']) / float(row['qlen'])), 2)
@@ -151,7 +151,7 @@ class ViralProteinAnnotator(BaseAnnotator):
         records = list(SeqIO.parse(open(input_file, "r"), "fasta"))
         self.protein_results = self._init_protein_results(records)
         self.protein_results = self._update_protein_results(records, self.protein_annotations)
-
+    
     def _init_protein_results(self, records) -> Dict[str, Any]:
         """Initialize protein results structure."""
         results = {}
@@ -160,14 +160,14 @@ class ViralProteinAnnotator(BaseAnnotator):
             if contig_id not in results:
                 results[contig_id] = {}
         return results
-
+    
     def _update_protein_results(self, records, annotations: Dict[str, Any]) -> Dict[str, Any]:
         """Update protein results with annotation information."""
         for record in records:
             contig_id, prot_id, protinfo = self._extract_protein_features(record, annotations)
             self.protein_results[contig_id][prot_id] = protinfo
         return self.protein_results
-
+    
     def _extract_protein_features(self, record, annotations: Dict[str, Any]) -> tuple:
         """Extract protein features and annotation from record."""
         dataprot = record.description.split(' # ')
@@ -211,10 +211,10 @@ class ViralProteinAnnotator(BaseAnnotator):
                 'evalue': ann['evalue']
             })
         return contig_id, prot_id, protinfo
-
+    
     def _run_hmmer_annotation(self, input_file: str) -> None:
         """Run HMMER for protein function refinement (placeholder)."""
         self.logger.info("HMMER annotation would be implemented here.")
-
+    
     def get_output_files(self) -> List[str]:
         return [f"protein_results_{contig_id}.csv" for contig_id in self.protein_results.keys()] 

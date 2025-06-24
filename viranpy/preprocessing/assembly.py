@@ -132,12 +132,28 @@ class Assembler:
             subprocess.run(cmd, check=True)
             self.logger.info(f"SPAdes assembly completed: {output_dir}")
             
-            # Get contigs file
+            # Get scaffolds file (preferred over contigs for viral assembly)
+            scaffolds_file = Path(output_dir) / "scaffolds.fasta"
             contigs_file = Path(output_dir) / "contigs.fasta"
-            if contigs_file.exists():
-                return {"success": True, "contigs_file": str(contigs_file)}
+            
+            # Prefer scaffolds if available, fallback to contigs
+            if scaffolds_file.exists():
+                self.logger.info("Using SPAdes scaffolds for assembly")
+                assembly_file = scaffolds_file
+            elif contigs_file.exists():
+                self.logger.info("Using SPAdes contigs (scaffolds not available)")
+                assembly_file = contigs_file
             else:
-                return {"success": False, "error": "No contigs file found"}
+                return {"success": False, "error": "No scaffolds or contigs file found"}
+            
+            # Rename contigs with descriptive headers
+            renamed_file = output_dir / "scaffolds_renamed.fasta" if scaffolds_file.exists() else output_dir / "contigs_renamed.fasta"
+            self._rename_contigs_with_descriptive_headers(
+                str(assembly_file), 
+                str(renamed_file),
+                assembly_method="spades"
+            )
+            return {"success": True, "contigs_file": str(renamed_file)}
                 
         except subprocess.CalledProcessError as e:
             self.logger.error(f"SPAdes assembly failed: {e}")
@@ -217,7 +233,14 @@ class Assembler:
             # Get contigs file
             contigs_file = Path(output_dir) / "final.contigs.fa"
             if contigs_file.exists():
-                return {"success": True, "contigs_file": str(contigs_file)}
+                # Rename contigs with descriptive headers
+                renamed_file = output_dir / "contigs_renamed.fasta"
+                self._rename_contigs_with_descriptive_headers(
+                    str(contigs_file), 
+                    str(renamed_file),
+                    assembly_method="megahit"
+                )
+                return {"success": True, "contigs_file": str(renamed_file)}
             else:
                 return {"success": False, "error": "No contigs file found"}
                 
@@ -238,8 +261,18 @@ class Assembler:
         Returns:
             Dictionary containing CD-HIT results
         """
-        # Always write to output_file inside self.config.root_output
-        output_file = os.path.join(self.config.root_output, output_file)
+        # Ensure output_file is a simple filename, not a full path
+        output_basename = os.path.basename(output_file)
+        output_prefix = os.path.splitext(output_basename)[0]
+        
+        # Create full output path
+        if hasattr(self.config, 'root_output') and self.config.root_output:
+            output_dir = self.config.root_output
+        else:
+            output_dir = "."
+        
+        full_output_path = os.path.join(output_dir, output_prefix)
+        final_output_file = os.path.join(output_dir, output_basename)
         
         # Combine input files if multiple
         combined_input = "combined_contigs.fasta"
@@ -248,18 +281,27 @@ class Assembler:
         cmd = [
             "cd-hit-est",
             "-i", combined_input,
-            "-o", output_file.replace('.fasta', ''),
+            "-o", full_output_path,
             "-c", str(identity),
             "-T", str(self.config.ncpus or 1)
         ]
         
         try:
             subprocess.run(cmd, check=True)
-            self.logger.info(f"CD-HIT clustering completed: {output_file}")
+            
+            # CD-HIT creates output without extension, so we need to rename it
+            cdhit_output = full_output_path
+            if os.path.exists(cdhit_output):
+                # Rename to include .fasta extension
+                os.rename(cdhit_output, final_output_file)
+                self.logger.info(f"CD-HIT clustering completed: {final_output_file}")
+            else:
+                self.logger.error(f"CD-HIT output file not found: {cdhit_output}")
+                return {"success": False, "error": "CD-HIT output file not found"}
             
             # Get statistics
-            stats = self._get_cdhit_statistics(output_file)
-            return {"success": True, "output_file": output_file, "statistics": stats}
+            stats = self._get_cdhit_statistics(final_output_file)
+            return {"success": True, "output_file": final_output_file, "statistics": stats}
             
         except subprocess.CalledProcessError as e:
             self.logger.error(f"CD-HIT clustering failed: {e}")
@@ -282,8 +324,17 @@ class Assembler:
         Returns:
             Dictionary containing hybrid assembly results
         """
-        # Always write to output_file inside self.config.root_output
-        output_file = os.path.join(self.config.root_output, output_file)
+        # Create hybrid_assembly directory
+        if hasattr(self.config, 'root_output') and self.config.root_output:
+            output_dir = os.path.join(self.config.root_output, "hybrid_assembly")
+        else:
+            output_dir = "hybrid_assembly"
+        
+        os.makedirs(output_dir, exist_ok=True)
+        
+        # Update output file path to be inside the directory
+        output_basename = os.path.basename(output_file)
+        final_output_file = os.path.join(output_dir, output_basename)
         
         try:
             # Combine contigs from both assemblers
@@ -312,8 +363,15 @@ class Assembler:
                 os.remove("temp_combined.fasta")
             
             if cdhit_result["success"]:
-                self.logger.info(f"Hybrid assembly created: {output_file}")
-                return {"success": True, "output_file": output_file}
+                # Rename contigs with descriptive headers
+                renamed_file = self._rename_contigs_with_descriptive_headers(
+                    cdhit_result["output_file"], 
+                    final_output_file,
+                    assembly_method="hybrid"
+                )
+                
+                self.logger.info(f"Hybrid assembly created: {renamed_file}")
+                return {"success": True, "output_file": renamed_file}
             else:
                 return cdhit_result
                 
@@ -321,24 +379,87 @@ class Assembler:
             self.logger.error(f"Hybrid assembly failed: {e}")
             return {"success": False, "error": str(e)}
     
+    def _rename_contigs_with_descriptive_headers(self, input_file: str, output_file: str, 
+                                               assembly_method: str = "unknown") -> str:
+        """
+        Rename contigs with descriptive headers including contig number, length, GC content, etc.
+        
+        Args:
+            input_file: Input FASTA file
+            output_file: Output FASTA file with renamed contigs
+            assembly_method: Assembly method used (spades, megahit, hybrid)
+            
+        Returns:
+            Path to the renamed output file
+        """
+        try:
+            from Bio.SeqUtils import GC
+            
+            renamed_contigs = []
+            contig_number = 1
+            
+            for record in SeqIO.parse(input_file, "fasta"):
+                # Calculate contig properties
+                length = len(record.seq)
+                gc_content = GC(record.seq)
+                
+                # Create descriptive header
+                new_id = f"viranpy_contig_{contig_number:06d}"
+                new_description = f"len={length}bp gc={gc_content:.1f}% method={assembly_method} orig_id={record.id}"
+                
+                # Create new record
+                new_record = record
+                new_record.id = new_id
+                new_record.description = new_description
+                renamed_contigs.append(new_record)
+                
+                contig_number += 1
+            
+            # Write renamed contigs
+            SeqIO.write(renamed_contigs, output_file, "fasta")
+            
+            self.logger.info(f"Renamed {len(renamed_contigs)} contigs with descriptive headers")
+            return output_file
+            
+        except Exception as e:
+            self.logger.error(f"Failed to rename contigs: {e}")
+            # Fallback: just copy the original file
+            import shutil
+            shutil.copy2(input_file, output_file)
+            return output_file
+    
     def filter_contigs_by_length(self, input_file: str, min_length: int = 200,
                                 output_file: str = None) -> Dict[str, Any]:
         """
         Filter contigs by minimum length.
         
         Args:
-            input_file: Input FASTA file
+            input_file: Input FASTA file (with descriptive headers)
             min_length: Minimum contig length
             output_file: Output file (if None, auto-generated)
             
         Returns:
             Dictionary containing filtering results
+            
+        Note:
+            This method preserves the descriptive headers created by the assembly methods.
+            Headers follow the format: viranpy_contig_NNNNNN len=Xbp gc=Y% method=Z orig_id=W
         """
-        # Always write to output_file inside self.config.root_output
+        # Create output file path
         if output_file is None:
-            output_file = os.path.join(self.config.root_output, input_file.replace('.fasta', f'_filtered_{min_length}bp.fasta'))
+            input_basename = os.path.basename(input_file)
+            input_name = os.path.splitext(input_basename)[0]
+            output_basename = f"{input_name}_filtered_{min_length}bp.fasta"
         else:
-            output_file = os.path.join(self.config.root_output, output_file)
+            output_basename = os.path.basename(output_file)
+        
+        # Create full output path
+        if hasattr(self.config, 'root_output') and self.config.root_output:
+            output_dir = self.config.root_output
+        else:
+            output_dir = "."
+        
+        final_output_file = os.path.join(output_dir, output_basename)
         
         try:
             filtered_contigs = []
@@ -347,9 +468,10 @@ class Assembler:
             for record in SeqIO.parse(input_file, "fasta"):
                 total_contigs += 1
                 if len(record.seq) >= min_length:
+                    # Preserve the descriptive header
                     filtered_contigs.append(record)
             
-            SeqIO.write(filtered_contigs, output_file, "fasta")
+            SeqIO.write(filtered_contigs, final_output_file, "fasta")
             
             stats = {
                 "total_contigs": total_contigs,
@@ -358,7 +480,7 @@ class Assembler:
             }
             
             self.logger.info(f"Contig filtering completed: {len(filtered_contigs)}/{total_contigs} contigs retained")
-            return {"success": True, "output_file": output_file, "statistics": stats}
+            return {"success": True, "output_file": final_output_file, "statistics": stats}
             
         except Exception as e:
             self.logger.error(f"Contig filtering failed: {e}")
@@ -383,56 +505,4 @@ class Assembler:
         except Exception as e:
             self.logger.warning(f"Could not parse CD-HIT output for statistics: {e}")
         
-        return stats
-    
-    def generate_assembly_report(self, assembly_results: Dict[str, Any]) -> str:
-        """Generate a comprehensive assembly report."""
-        report_file = "assembly_report.html"
-        
-        html_content = self._create_assembly_html_report(assembly_results)
-        
-        with open(report_file, 'w') as f:
-            f.write(html_content)
-        
-        return report_file
-    
-    def _create_assembly_html_report(self, assembly_results: Dict[str, Any]) -> str:
-        """Create HTML assembly report."""
-        html = """
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <title>Assembly Report</title>
-            <style>
-                body { font-family: Arial, sans-serif; margin: 20px; }
-                .section { margin: 20px 0; padding: 10px; border: 1px solid #ddd; }
-                .metric { margin: 10px 0; }
-                .assembly-result { margin: 15px 0; padding: 10px; background: #f9f9f9; }
-            </style>
-        </head>
-        <body>
-            <h1>Assembly Report</h1>
-        """
-        
-        for assembler, result in assembly_results.items():
-            html += f"<div class='section'><h2>{assembler.upper()} Assembly</h2>"
-            if result.get("success"):
-                html += f"<div class='assembly-result'>"
-                html += f"<p><strong>Status:</strong> Success</p>"
-                html += f"<p><strong>Contigs file:</strong> {result.get('contigs_file', 'N/A')}</p>"
-                
-                if "statistics" in result:
-                    stats = result["statistics"]
-                    html += f"<p><strong>Total contigs:</strong> {stats.get('total_contigs', 'N/A')}</p>"
-                    html += f"<p><strong>Total bases:</strong> {stats.get('total_bases', 'N/A'):,}</p>"
-                
-                html += "</div>"
-            else:
-                html += f"<div class='assembly-result'>"
-                html += f"<p><strong>Status:</strong> Failed</p>"
-                html += f"<p><strong>Error:</strong> {result.get('error', 'Unknown error')}</p>"
-                html += "</div>"
-            html += "</div>"
-        
-        html += "</body></html>"
-        return html 
+        return stats 

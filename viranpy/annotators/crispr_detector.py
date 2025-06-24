@@ -22,15 +22,15 @@ class ViralCRISPRFinder(BaseAnnotator):
     def __init__(self, config, logger=None):
         super().__init__(config, logger)
         self.crispr_results = {}
-
+    
     def check_dependencies(self) -> bool:
         """Check if PILER-CR is available."""
         return cmd_exists("pilercr")
-
+    
     def validate_input(self, input_file: str) -> bool:
         """Validate input FASTA file."""
         return Path(input_file).exists() and Path(input_file).suffix.lower() in ['.fasta', '.fa', '.fna']
-
+    
     def run(self, input_file: str, **kwargs) -> Dict[str, Any]:
         """
         Run CRISPR array detection for all sequences in the input file.
@@ -75,7 +75,7 @@ class ViralCRISPRFinder(BaseAnnotator):
             for line in crisprfile:
                 if "SUMMARY BY POSITION" in line:
                     in_summary = True
-                    continue
+                            continue
                 if in_summary:
                     match = re.match(r"^\s+(\d+)\s+(.{16})\s+(\d+)\s+(\d+)\s+\d+\s+\d+\s+\d+\s+\d?\s+(\w+)", line)
                     if match:

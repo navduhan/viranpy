@@ -33,15 +33,15 @@ class ViralGenomeTopology(BaseAnnotator):
     def __init__(self, config, logger=None):
         super().__init__(config, logger)
         self.topology_results = {}
-
+    
     def check_dependencies(self) -> bool:
         """Check if LASTZ is available."""
         return cmd_exists("lastz")
-
+    
     def validate_input(self, input_file: str) -> bool:
         """Validate input FASTA file."""
         return Path(input_file).exists() and Path(input_file).suffix.lower() in ['.fasta', '.fa', '.fna']
-
+    
     def run(self, input_file: str, **kwargs) -> Dict[str, Any]:
         """
         Run genome topology prediction for all sequences in the input file.
@@ -64,7 +64,7 @@ class ViralGenomeTopology(BaseAnnotator):
             result.error_message = str(e)
             self.logger.error(f"Genome topology prediction failed: {e}")
         return result.to_dict()
-
+    
     def _analyze_sequence_topology(self, record: SeqRecord) -> None:
         """
         Analyze topology for a single viral sequence using LASTZ.
@@ -75,8 +75,8 @@ class ViralGenomeTopology(BaseAnnotator):
         write_temp_file(combined_seqs)
         try:
             output = subprocess.check_output([
-                "lastz", "temporal_circular.fasta", "--self", "--notrivial",
-                "--nomirror", "--ambiguous=iupac",
+                "lastz", "temporal_circular.fasta", "--self", "--notrivial", 
+                "--nomirror", "--ambiguous=iupac", 
                 "--format=general-:start1,end1,start2,end2,score,strand1,strand2,identity,length1"
             ], stderr=subprocess.PIPE, text=True)
             self._parse_lastz_output(output, record)
@@ -85,7 +85,7 @@ class ViralGenomeTopology(BaseAnnotator):
         finally:
             if os.path.exists("temporal_circular.fasta"):
                 os.remove("temporal_circular.fasta")
-
+    
     def _parse_lastz_output(self, output: str, record: SeqRecord) -> None:
         """
         Parse LASTZ output to determine genome topology.
@@ -99,10 +99,10 @@ class ViralGenomeTopology(BaseAnnotator):
                 length = int(length)
                 identity = float(fractions.Fraction(identity))
                 read_len = getattr(self.config, 'gc_skew_read_length', 101)
-                if (strand1 == strand2 and
+                if (strand1 == strand2 and 
                     length > 0.4 * read_len and
-                    identity > 0.95 and
-                    int(start1) < 5 and
+                    identity > 0.95 and 
+                    int(start1) < 5 and 
                     int(start2) > read_len and
                     int(end1) < read_len and
                     int(end2) > read_len * 2 * 0.9):
@@ -111,7 +111,7 @@ class ViralGenomeTopology(BaseAnnotator):
                     self.topology_results[record.id]["length"] = max(length, self.topology_results[record.id].get("length", length))
             except (ValueError, IndexError) as e:
                 self.logger.warning(f"Failed to parse LASTZ line: {line}, error: {e}")
-
+    
     def get_output_files(self) -> List[str]:
         return ["genome_topology_log.txt"]
 

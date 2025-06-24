@@ -22,15 +22,15 @@ class ViralNcRNAFinder(BaseAnnotator):
     def __init__(self, config, logger=None):
         super().__init__(config, logger)
         self.ncrna_results = {}
-
+    
     def check_dependencies(self) -> bool:
         """Check if cmscan is available."""
         return cmd_exists("cmscan")
-
+    
     def validate_input(self, input_file: str) -> bool:
         """Validate input FASTA file."""
         return Path(input_file).exists() and Path(input_file).suffix.lower() in ['.fasta', '.fa', '.fna']
-
+    
     def run(self, input_file: str, **kwargs) -> Dict[str, Any]:
         """
         Run ncRNA detection for all sequences in the input file.
@@ -77,7 +77,7 @@ class ViralNcRNAFinder(BaseAnnotator):
                     continue
                 fields = re.sub("\s{2,}", ",", line).split(",")
                 if len(fields) < 15:
-                    continue
+                        continue
                 contig_id = fields[1] if len(fields) == 15 else fields[2]
                 if contig_id not in ncrna_dict:
                     ncrna_dict[contig_id] = []

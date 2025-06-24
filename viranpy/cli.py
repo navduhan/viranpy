@@ -30,6 +30,11 @@ def create_parser() -> argparse.ArgumentParser:
         description='ViRAnPy - Viral Metagenomic Analysis Pipeline\n\n'
                    'Primary Workflow: ViRAnPy is designed for viral metagenomic analysis starting from raw reads. '
                    'The default workflow includes quality control, host removal, assembly, and viral annotation.\n\n'
+                   'Workflow Options:\n'
+                   '  • Read files + no flags: Full pipeline (preprocessing + assembly + annotation)\n'
+                   '  • Read files + --assemble-only: Preprocessing + assembly only\n'
+                   '  • Read files + --qc-only: Quality control only\n'
+                   '  • --input FASTA: Direct annotation of pre-assembled contigs\n\n'
                    'Database Management: ViRAnPy automatically manages all required databases. '
                    'Use --build-databases to install databases and --check-databases to verify installation.',
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -48,31 +53,34 @@ Examples:
   viranpy --generate-metadata --sample-name SEGMENTED001 --viral-family Orthomyxoviridae --viral-genus Influenzavirus --segments segment1 segment2 segment3 --source human --location Canada
   
   # Full viral metagenomic pipeline with paired-end reads (explicit)
-  viranpy --pe1 R1.fastq --pe2 R2.fastq --generate-metadata --sample-name VIROME001 --assemble --host-genome host.fasta --taxonomy-contigs --coverage-analysis --quast-analysis
+  viranpy --pe1 R1.fastq --pe2 R2.fastq --generate-metadata --sample-name VIROME001 --host-genome host.fasta --taxonomy-contigs --coverage-analysis --quast-analysis
   
   # Full viral metagenomic pipeline with paired-end reads (automatic detection)
-  viranpy --reads R1.fastq R2.fastq --generate-metadata --sample-name VIROME001 --assemble --host-genome host.fasta --taxonomy-contigs --coverage-analysis --quast-analysis
+  viranpy --reads R1.fastq R2.fastq --generate-metadata --sample-name VIROME001 --host-genome host.fasta --taxonomy-contigs --coverage-analysis --quast-analysis
   
   # Full pipeline with single-end reads (explicit)
-  viranpy --single reads.fastq --viral-metadata viral_metadata.txt --assemble --host-genome host.fasta --taxonomy-contigs --coverage-analysis --quast-analysis
+  viranpy --single reads.fastq --viral-metadata viral_metadata.txt --host-genome host.fasta --taxonomy-contigs --coverage-analysis --quast-analysis
   
   # Full pipeline with single-end reads (automatic detection)
-  viranpy --reads reads.fastq --viral-metadata viral_metadata.txt --assemble --host-genome host.fasta --taxonomy-contigs --coverage-analysis --quast-analysis
+  viranpy --reads reads.fastq --viral-metadata viral_metadata.txt --host-genome host.fasta --taxonomy-contigs --coverage-analysis --quast-analysis
   
-  # Full pipeline with comprehensive reporting
-  viranpy --pe1 R1.fastq --pe2 R2.fastq --viral-metadata viral_metadata.txt --assemble --host-genome host.fasta --taxonomy-raw-reads --taxonomy-contigs --coverage-analysis --quast-analysis --comprehensive-report
+  # Full pipeline with comprehensive reporting (annotation runs by default)
+  viranpy --pe1 R1.fastq --pe2 R2.fastq --viral-metadata viral_metadata.txt --host-genome host.fasta --taxonomy-raw-reads --taxonomy-contigs --coverage-analysis --quast-analysis --comprehensive-report
+  
+  # Assembly only (skip annotation)
+  viranpy --pe1 R1.fastq --pe2 R2.fastq --viral-metadata viral_metadata.txt --assemble-only --host-genome host.fasta --coverage-analysis --quast-analysis
+  
+  # Assembly with selective annotation (skip specific steps)
+  viranpy --pe1 R1.fastq --pe2 R2.fastq --viral-metadata viral_metadata.txt --host-genome host.fasta --skip-crispr-detection --skip-trna-detection
   
   # Quality control and host removal only
   viranpy --pe1 R1.fastq --pe2 R2.fastq --viral-metadata viral_metadata.txt --qc-only --host-genome host.fasta
   
-  # Assembly only with taxonomic classification and coverage
-  viranpy --pe1 R1.fastq --pe2 R2.fastq --viral-metadata viral_metadata.txt --assemble-only --taxonomy-contigs --coverage-analysis --quast-analysis
-  
-  # Using pre-built Bowtie2 index
-  viranpy --pe1 R1.fastq --pe2 R2.fastq --viral-metadata viral_metadata.txt --assemble --bowtie2-index /path/to/host_index --coverage-analysis
-  
   # Direct annotation of pre-assembled contigs (ADVANCED)
   viranpy --input genome.fasta --viral-metadata viral_metadata.txt
+  
+  # Using pre-built Bowtie2 index
+  viranpy --pe1 R1.fastq --pe2 R2.fastq --viral-metadata viral_metadata.txt --bowtie2-index /path/to/host_index --coverage-analysis
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 🎉 Thank you for using ViRAnPy! 🦠
@@ -105,16 +113,12 @@ Examples:
         help='Single-end FASTQ file', metavar="SINGLE_FASTQ"
     )
     workflow_group.add_argument(
-        "--assemble", dest="assemble", action='store_true', default=False,
-        help='Run assembly pipeline (Default: False)'
-    )
-    workflow_group.add_argument(
         "--qc-only", dest="qc_only", action='store_true', default=False,
         help='Run quality control only (Default: False)'
     )
     workflow_group.add_argument(
         "--assemble-only", dest="assemble_only", action='store_true', default=False,
-        help='Run assembly only (Default: False)'
+        help='Run preprocessing and assembly only (skip viral annotation) (Default: False)'
     )
     
     # Direct annotation options (for pre-assembled contigs)
@@ -187,16 +191,16 @@ Examples:
     # Analysis options
     analysis_group = parser.add_argument_group('Analysis options [OPTIONAL]')
     analysis_group.add_argument(
-        "--coverage-analysis", dest="coverage_analysis", action='store_true', default=False,
-        help='Calculate coverage for contigs using BWA and samtools (Default: False)'
+        "--skip-coverage-analysis", dest="skip_coverage_analysis", action='store_true', default=False,
+        help='Skip coverage analysis for contigs using BWA and samtools (Default: False - coverage analysis runs by default)'
     )
     analysis_group.add_argument(
-        "--quast-analysis", dest="quast_analysis", action='store_true', default=False,
-        help='Run QUAST for assembly quality assessment (Default: False)'
+        "--skip-quast-analysis", dest="skip_quast_analysis", action='store_true', default=False,
+        help='Skip QUAST for assembly quality assessment (Default: False - QUAST analysis runs by default)'
     )
     analysis_group.add_argument(
-        "--comprehensive-report", dest="comprehensive_report", action='store_true', default=False,
-        help='Generate comprehensive HTML report with all analysis results (Default: False)'
+        "--skip-comprehensive-report", dest="skip_comprehensive_report", action='store_true', default=False,
+        help='Skip comprehensive HTML report generation (Default: False - comprehensive report generated by default)'
     )
     
     # Quality control options
@@ -267,6 +271,33 @@ Examples:
         help='Minimum contig length to keep (Default: 200)', metavar="INT"
     )
     
+    # Annotation options
+    annotation_group = parser.add_argument_group('Annotation options [OPTIONAL]')
+    annotation_group.add_argument(
+        "--skip-annotation", dest="skip_annotation", action='store_true', default=False,
+        help='Skip viral annotation pipeline after assembly (Default: False - annotation runs by default)'
+    )
+    annotation_group.add_argument(
+        "--skip-genome-shape", dest="skip_genome_shape", action='store_true', default=False,
+        help='Skip genome shape prediction (Default: False)'
+    )
+    annotation_group.add_argument(
+        "--skip-trna-detection", dest="skip_trna_detection", action='store_true', default=False,
+        help='Skip tRNA/tmRNA detection (Default: False)'
+    )
+    annotation_group.add_argument(
+        "--skip-crispr-detection", dest="skip_crispr_detection", action='store_true', default=False,
+        help='Skip CRISPR detection (Default: False)'
+    )
+    annotation_group.add_argument(
+        "--skip-gene-prediction", dest="skip_gene_prediction", action='store_true', default=False,
+        help='Skip gene prediction (Default: False)'
+    )
+    annotation_group.add_argument(
+        "--skip-protein-function", dest="skip_protein_function", action='store_true', default=False,
+        help='Skip protein function prediction (Default: False)'
+    )
+    
     # Advanced general options [OPTIONAL]
     advanced_general_group = parser.add_argument_group('Advanced general options [OPTIONAL]')
     advanced_general_group.add_argument(
@@ -275,10 +306,11 @@ Examples:
     )
     advanced_general_group.add_argument(
         "--locus", dest="locus", type=str, default='LOC',
-        help='Name of the sequences (Default: %(default)s)', metavar="STRING"
+        help='Name of the sequences (Default: LOC)', metavar="STRING"
     )
+    ncpus_default = os.cpu_count() or 1
     advanced_general_group.add_argument(
-        "--threads", dest="ncpus", type=int, default=os.cpu_count(),
+        "--threads", dest="ncpus", type=int, default=ncpus_default,
         help='Number of threads/CPUs to use for all steps (Default: all available)', metavar="INT"
     )
     advanced_general_group.add_argument(
@@ -291,7 +323,7 @@ Examples:
     )
     advanced_general_group.add_argument(
         "--memory", dest="memory", type=str, default=None,
-        help='Memory limit for tools (e.g., "16G", "8GB", "16384M"). For MEGAHIT on Mac, this is required and converted to bytes. Default: system-based (16GB if >=16GB RAM, 75% of system RAM otherwise)', metavar="MEMORY"
+        help='Memory limit for tools (e.g., "16G", "8GB", "16384M"). For MEGAHIT on Mac, this is required and converted to bytes. Default: system-based (16GB if >=16GB RAM, 75%% of system RAM otherwise)', metavar="MEMORY"
     )
     
     # Advanced circularity options
@@ -468,9 +500,7 @@ def parse_args(args: Optional[list] = None) -> argparse.Namespace:
     if parsed_args.pe1_file or parsed_args.pe2_file or parsed_args.single_file:
         if parsed_args.read_files:
             parser.error("Cannot use --reads with --pe1/--pe2 or --single options")
-        
         if parsed_args.pe1_file and parsed_args.pe2_file:
-            # Use --pe1 as R1 and --pe2 as R2 in that exact order
             parsed_args.read_files = [parsed_args.pe1_file, parsed_args.pe2_file]
             parsed_args.paired = True
             parsed_args.single = False
@@ -489,14 +519,12 @@ def parse_args(args: Optional[list] = None) -> argparse.Namespace:
         elif len(parsed_args.read_files) == 2:
             parsed_args.paired = True
             parsed_args.single = False
-            # Warn about file order
             print("[INFO] Using --reads with 2 files. Ensure files are in correct order: R1.fastq R2.fastq")
             print("[INFO] For explicit control, consider using --pe1 R1.fastq --pe2 R2.fastq instead")
         else:
             parser.error("--reads must specify either 1 file (single-end) or 2 files (paired-end)")
     
-    if parsed_args.read_files and not (parsed_args.assemble or parsed_args.qc_only or parsed_args.assemble_only):
-        parser.error("When using read files, must specify one of: --assemble, --qc-only, or --assemble-only")
+    # No error here: if user provides read files and no flag, run full pipeline by default
     
     # Only require sample name for metadata generation, otherwise infer from file
     if parsed_args.generate_metadata and not parsed_args.sample_name:
@@ -519,7 +547,7 @@ def parse_args(args: Optional[list] = None) -> argparse.Namespace:
     
     # Warn if host genome is not provided but moving to assembly or QC
     if (
-        (getattr(parsed_args, 'assemble', False) or getattr(parsed_args, 'assemble_only', False) or getattr(parsed_args, 'qc_only', False))
+        (getattr(parsed_args, 'assemble_only', False) or getattr(parsed_args, 'qc_only', False))
         and not getattr(parsed_args, 'skip_host_removal', False)
         and not getattr(parsed_args, 'host_genome', None)
     ):
@@ -666,24 +694,42 @@ def main(args: Optional[list] = None) -> int:
             parsed_args.root_output = output_dir
         output_dir = Path(output_dir)
         orig_output_dir = output_dir
-        suffix = 1
-        while output_dir.exists():
-            # If running interactively, ask user; else, auto-increment
-            if sys.stdin.isatty():
-                response = input(f"Output directory '{output_dir}' already exists. Overwrite? [y/N] (or type 'new' to create a new directory): ").strip().lower()
-                if response == 'y':
-                    shutil.rmtree(output_dir)
-                    break
-                elif response == 'new' or response == 'n' or response == '':
+        
+        # Handle resume mode differently
+        if getattr(parsed_args, 'resume', False):
+            # In resume mode, use the existing directory or create it if it doesn't exist
+            if output_dir.exists():
+                print(f"Resuming pipeline in existing directory: {output_dir}")
+                # Check if pipeline state file exists
+                state_file = output_dir / "pipeline_state.json"
+                if state_file.exists():
+                    print(f"Found existing pipeline state file: {state_file}")
+                else:
+                    print(f"Warning: No pipeline state file found in {output_dir}. This may be a fresh run.")
+            else:
+                print(f"Creating new directory for resume: {output_dir}")
+                output_dir.mkdir(parents=True, exist_ok=True)
+        else:
+            # Normal mode: handle existing directories
+            suffix = 1
+            while output_dir.exists():
+                # If running interactively, ask user; else, auto-increment
+                if sys.stdin.isatty():
+                    response = input(f"Output directory '{output_dir}' already exists. Overwrite? [y/N] (or type 'new' to create a new directory): ").strip().lower()
+                    if response == 'y':
+                        shutil.rmtree(output_dir)
+                        break
+                    elif response == 'new' or response == 'n' or response == '':
+                        output_dir = Path(f"{orig_output_dir}.{suffix}")
+                        suffix += 1
+                    else:
+                        print("Invalid response. Please answer 'y' to overwrite or 'new' to create a new directory.")
+                else:
+                    # Non-interactive: always create a new suffixed directory
                     output_dir = Path(f"{orig_output_dir}.{suffix}")
                     suffix += 1
-                else:
-                    print("Invalid response. Please answer 'y' to overwrite or 'new' to create a new directory.")
-            else:
-                # Non-interactive: always create a new suffixed directory
-                output_dir = Path(f"{orig_output_dir}.{suffix}")
-                suffix += 1
-        output_dir.mkdir(parents=True, exist_ok=True)
+            output_dir.mkdir(parents=True, exist_ok=True)
+        
         parsed_args.root_output = str(output_dir)
 
         # --- Logging to output directory ---
@@ -701,18 +747,47 @@ def main(args: Optional[list] = None) -> int:
         # Create and run pipeline
         pipeline = ViralAnnotationPipeline(config, logger_instance=logger, resume=getattr(config, 'resume', False))
         
-        if parsed_args.qc_only:
+        if parsed_args.input_file:
+            # Direct annotation of pre-assembled contigs
+            logger.info("Running viral annotation pipeline on pre-assembled contigs...")
+            annotation_result = pipeline.run(parsed_args.input_file)
+            logger.info("Viral annotation pipeline completed successfully")
+        elif parsed_args.qc_only:
             # Run quality control only
             pipeline.run_quality_control(parsed_args.read_files, parsed_args.paired)
         elif parsed_args.assemble_only:
-            # Run assembly only
-            pipeline.run_assembly(parsed_args.read_files, parsed_args.paired)
-        elif parsed_args.assemble:
-            # Run full preprocessing and assembly pipeline
+            # Run preprocessing and assembly only
             pipeline.run_preprocessing_pipeline(parsed_args.read_files, parsed_args.paired)
         else:
-            # Run annotation pipeline
-            pipeline.run(parsed_args.input_file)
+            # Run full metagenomic pipeline: preprocessing + assembly + annotation
+            logger.info("Running full metagenomic pipeline: preprocessing, assembly, and viral annotation...")
+            preprocessing_results = pipeline.run_preprocessing_pipeline(parsed_args.read_files, parsed_args.paired)
+            
+            # Run annotation by default after assembly (unless skipped)
+            if not getattr(parsed_args, 'skip_annotation', False):
+                logger.info("Running viral annotation pipeline on assembled contigs...")
+                
+                # Find the best assembly result to use for annotation
+                best_assembly = None
+                if preprocessing_results and 'assembly' in preprocessing_results:
+                    assembly_results = preprocessing_results['assembly']
+                    # Prefer hybrid, then spades, then megahit
+                    for assembler in ['hybrid', 'spades', 'megahit']:
+                        if assembler in assembly_results and assembly_results[assembler] and assembly_results[assembler].get('success'):
+                            best_assembly = assembly_results[assembler].get('contigs_file')
+                            logger.info(f"Using {assembler} assembly for annotation: {best_assembly}")
+                            break
+                
+                if best_assembly and os.path.exists(best_assembly):
+                    # Set the input file for annotation
+                    config.input_file = best_assembly
+                    # Run the annotation pipeline
+                    annotation_result = pipeline.run(best_assembly)
+                    logger.info("Viral annotation pipeline completed successfully")
+                else:
+                    logger.warning("No successful assembly found for annotation. Skipping annotation pipeline.")
+            else:
+                logger.info("Skipping viral annotation pipeline as requested (--skip-annotation)")
         
         logger.info("Pipeline completed successfully")
         print("\nThank you for using ViRAnPy!")
@@ -721,10 +796,16 @@ def main(args: Optional[list] = None) -> int:
         return 0
         
     except KeyboardInterrupt:
-        logger.info("Pipeline interrupted by user")
+        if 'logger' in locals():
+            logger.info("Pipeline interrupted by user")
+        else:
+            print("Pipeline interrupted by user")
         return 130
     except Exception as e:
-        logger.error(f"Pipeline failed: {e}")
+        if 'logger' in locals():
+            logger.error(f"Pipeline failed: {e}")
+        else:
+            print(f"Pipeline failed: {e}")
         return 1
 
 

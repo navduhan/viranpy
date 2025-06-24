@@ -348,7 +348,7 @@ class DatabaseManager:
                               '-dbtype', 'prot', '-out', str(blast_dir / 'refseq_viral_proteins')], 
                              cwd=blast_dir, check=True, capture_output=True)
                 (blast_dir / db_info['final']).unlink()
-            return True
+                return True
         except Exception as e:
             self.logger.error(f"Error installing RefSeq Viral: {e}")
             return False

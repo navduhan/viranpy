@@ -175,43 +175,23 @@ class ViralAnnotationPipeline:
     def run_quality_control(self, read_files: List[str], paired: bool = False) -> Dict[str, Any]:
         """
         Run quality control pipeline only.
-        
-        Args:
-            read_files: List of input FASTQ files
-            paired: Whether reads are paired-end
-            
-        Returns:
-            Dictionary containing quality control results
         """
         try:
             with PipelineLogger("Quality Control Pipeline", self.logger):
                 results = {}
-                
-                # Check dependencies
                 if not self.quality_controller.check_dependencies():
                     raise RuntimeError("Quality control dependencies not available")
-                
-                # Run FastQC
                 if not getattr(self.config, 'skip_qc', False):
                     self.logger.info("Running FastQC quality assessment")
                     fastqc_results = self.quality_controller.run_fastqc(read_files)
                     results['fastqc'] = fastqc_results
-                    
-                    # Run Trim Galore
                     self.logger.info("Running Trim Galore quality trimming")
                     trim_results = self.quality_controller.run_trim_galore(read_files, paired)
                     results['trimming'] = trim_results
-                    
                     if trim_results.get('success'):
                         self.trimmed_files = trim_results.get('trimmed_files', [])
-                    
-                    # Generate quality control report
-                    qc_report = self.quality_controller.generate_quality_report(fastqc_results, trim_results)
-                    results['qc_report'] = qc_report
-                
                 self.logger.info("Quality control pipeline completed successfully")
                 return results
-                
         except Exception as e:
             self.logger.error(f"Quality control pipeline failed: {e}")
             raise
@@ -219,58 +199,30 @@ class ViralAnnotationPipeline:
     def run_assembly(self, read_files: List[str], paired: bool = False) -> Dict[str, Any]:
         """
         Run assembly pipeline only.
-        
-        Args:
-            read_files: List of input FASTQ files (should be trimmed)
-            paired: Whether reads are paired-end
-            
-        Returns:
-            Dictionary containing assembly results
         """
         try:
             with PipelineLogger("Assembly Pipeline", self.logger):
                 results = {}
-                
-                # Debug logging
-                self.logger.info(f"Pipeline assembly input files: {read_files}")
-                self.logger.info(f"Pipeline assembly paired flag: {paired}")
-                self.logger.info(f"Pipeline assembly number of files: {len(read_files)}")
-                
-                # Check dependencies
-                if not self.assembler.check_dependencies():
-                    raise RuntimeError("Assembly dependencies not available")
-                
-                # Use trimmed files if available, otherwise use input files
-                input_files = self.trimmed_files if self.trimmed_files else read_files
-                
-                self.logger.info(f"Pipeline assembly final input files: {input_files}")
-                self.logger.info(f"Pipeline assembly using trimmed files: {self.trimmed_files is not None}")
-                
-                # Run assembly based on method
+                input_files = self.filtered_files if self.filtered_files else read_files
                 assembler_method = getattr(self.config, 'assembler', 'hybrid')
-                
                 if assembler_method == 'spades':
                     self.logger.info("Running SPAdes assembly")
                     spades_result = self.assembler.run_spades(input_files, paired)
                     results['spades'] = spades_result
                     if spades_result.get('success'):
                         self.final_assembly_file = spades_result.get('contigs_file')
-                
                 elif assembler_method == 'megahit':
                     self.logger.info("Running MEGAHIT assembly")
                     megahit_result = self.assembler.run_megahit(input_files, paired)
                     results['megahit'] = megahit_result
                     if megahit_result.get('success'):
                         self.final_assembly_file = megahit_result.get('contigs_file')
-                
                 elif assembler_method == 'hybrid':
                     self.logger.info("Running hybrid assembly (MEGAHIT + SPAdes)")
                     megahit_result = self.assembler.run_megahit(input_files, paired)
                     spades_result = self.assembler.run_spades(input_files, paired)
-                    
                     results['megahit'] = megahit_result
                     results['spades'] = spades_result
-                    
                     if spades_result.get('success') and megahit_result.get('success'):
                         self.logger.info("Creating hybrid assembly")
                         hybrid_result = self.assembler.create_hybrid_assembly(
@@ -281,8 +233,6 @@ class ViralAnnotationPipeline:
                         results['hybrid'] = hybrid_result
                         if hybrid_result.get('success'):
                             self.final_assembly_file = hybrid_result.get('output_file')
-                
-                # Filter contigs by length
                 if self.final_assembly_file:
                     min_length = getattr(self.config, 'min_contig_length', 200)
                     filter_result = self.assembler.filter_contigs_by_length(
@@ -291,14 +241,8 @@ class ViralAnnotationPipeline:
                     results['filtering'] = filter_result
                     if filter_result.get('success'):
                         self.final_assembly_file = filter_result.get('output_file')
-                
-                # Generate assembly report
-                assembly_report = self.assembler.generate_assembly_report(results)
-                results['assembly_report'] = assembly_report
-                
                 self.logger.info("Assembly pipeline completed successfully")
                 return results
-                
         except Exception as e:
             self.logger.error(f"Assembly pipeline failed: {e}")
             raise
@@ -363,7 +307,18 @@ class ViralAnnotationPipeline:
                 else:
                     self.logger.info("Step 4: Assembly")
                     assembly_results = self.run_assembly(self.filtered_files, paired)
-                    self.pipeline_state['assembly'] = {'success': True, 'results': assembly_results}
+                    
+                    # Check if assembly was truly successful
+                    assembly_success = True
+                    if assembly_results:
+                        # Check if any critical assembly step failed
+                        for assembler, result in assembly_results.items():
+                            if assembler in ['spades', 'megahit', 'hybrid'] and result and not result.get('success'):
+                                assembly_success = False
+                                self.logger.error(f"Assembly step '{assembler}' failed: {result.get('error', 'Unknown error')}")
+                                break
+                    
+                    self.pipeline_state['assembly'] = {'success': assembly_success, 'results': assembly_results}
                     self._save_state()
                 results['assembly'] = assembly_results
                 # Step 5: Taxonomic classification of contigs
@@ -371,13 +326,20 @@ class ViralAnnotationPipeline:
                     self.logger.info("[RESUME] Skipping contigs taxonomy (already completed)")
                     contigs_taxonomy_results = self.pipeline_state['contigs_taxonomy']['results']
                 elif not getattr(self.config, 'skip_taxonomy', False) and getattr(self.config, 'taxonomy_contigs', True):
-                    if self.final_assembly_file:
+                    if self.final_assembly_file and os.path.exists(self.final_assembly_file):
                         self.logger.info("Step 5: Taxonomic classification of contigs")
-                        contigs_taxonomy_results = self._run_contigs_taxonomy(self.final_assembly_file)
-                        self.pipeline_state['contigs_taxonomy'] = {'success': True, 'results': contigs_taxonomy_results}
-                        self._save_state()
+                        try:
+                            contigs_taxonomy_results = self._run_contigs_taxonomy(self.final_assembly_file)
+                            self.pipeline_state['contigs_taxonomy'] = {'success': True, 'results': contigs_taxonomy_results}
+                            self._save_state()
+                        except Exception as e:
+                            self.logger.error(f"Contigs taxonomy failed: {e}")
+                            contigs_taxonomy_results = {"success": False, "error": str(e)}
+                            self.pipeline_state['contigs_taxonomy'] = {'success': False, 'error': str(e)}
+                            self._save_state()
                     else:
-                        contigs_taxonomy_results = None
+                        self.logger.warning("No valid assembly file available for contigs taxonomy")
+                        contigs_taxonomy_results = {"success": False, "error": "No assembly file available"}
                 else:
                     self.logger.info("Skipping contigs taxonomy (--skip-taxonomy or not requested)")
                     contigs_taxonomy_results = None
@@ -386,47 +348,66 @@ class ViralAnnotationPipeline:
                 if self.resume and self.pipeline_state.get('coverage', {}).get('success'):
                     self.logger.info("[RESUME] Skipping coverage analysis (already completed)")
                     coverage_results = self.pipeline_state['coverage']['results']
-                elif not getattr(self.config, 'skip_coverage', False):
-                    self.logger.info("Step 6: Coverage analysis (if implemented)")
-                    # Placeholder: implement coverage analysis if not already present
-                    coverage_results = None
-                    # self.pipeline_state['coverage'] = {'success': True, 'results': coverage_results}
-                    # self._save_state()
+                elif not getattr(self.config, 'skip_coverage_analysis', False):
+                    self.logger.info("Step 6: Coverage analysis")
+                    if self.final_assembly_file:
+                        from ..utils.coverage_calculator import CoverageCalculator
+                        coverage_calc = CoverageCalculator(self.config, self.logger)
+                        coverage_results = coverage_calc.calculate_coverage(
+                            self.final_assembly_file,
+                            self.filtered_files,
+                            paired,
+                            "coverage_results"
+                        )
+                        self.pipeline_state['coverage'] = {'success': True, 'results': coverage_results}
+                        self._save_state()
+                    else:
+                        self.logger.warning("No assembly file available for coverage analysis")
+                        coverage_results = None
                 else:
-                    self.logger.info("Skipping coverage analysis (--skip-coverage)")
+                    self.logger.info("Skipping coverage analysis (--skip-coverage-analysis specified)")
                     coverage_results = None
                 results['coverage'] = coverage_results
                 # Step 7: QUAST analysis
                 if self.resume and self.pipeline_state.get('quast', {}).get('success'):
                     self.logger.info("[RESUME] Skipping QUAST analysis (already completed)")
                     quast_results = self.pipeline_state['quast']['results']
-                elif not getattr(self.config, 'skip_quast', False):
-                    self.logger.info("Step 7: QUAST analysis (if implemented)")
-                    quast_results = None
-                    # self.pipeline_state['quast'] = {'success': True, 'results': quast_results}
-                    # self._save_state()
+                elif not getattr(self.config, 'skip_quast_analysis', False):
+                    self.logger.info("Step 7: QUAST analysis")
+                    if self.final_assembly_file:
+                        from ..utils.assembly_stats import AssemblyStatsCalculator
+                        quast_calc = AssemblyStatsCalculator(self.config, self.logger)
+                        quast_results = quast_calc.run_quast_analysis(
+                            self.final_assembly_file,
+                            "quast_results"
+                        )
+                        self.pipeline_state['quast'] = {'success': True, 'results': quast_results}
+                        self._save_state()
+                    else:
+                        self.logger.warning("No assembly file available for QUAST analysis")
+                        quast_results = None
                 else:
-                    self.logger.info("Skipping QUAST analysis (--skip-quast)")
+                    self.logger.info("Skipping QUAST analysis (--skip-quast-analysis specified)")
                     quast_results = None
                 results['quast'] = quast_results
                 # Step 8: Comprehensive reporting
-                if self.resume and self.pipeline_state.get('preprocessing_report', {}).get('success'):
-                    self.logger.info("[RESUME] Skipping comprehensive report (already completed)")
-                    preprocessing_report = self.pipeline_state['preprocessing_report']['results']
-                elif not getattr(self.config, 'skip_report', False):
-                    preprocessing_report = self._generate_preprocessing_report(results)
-                    self.pipeline_state['preprocessing_report'] = {'success': True, 'results': preprocessing_report}
+                if not getattr(self.config, 'skip_comprehensive_report', False):
+                    from ..utils.comprehensive_reporter import ComprehensiveReporter
+                    reporter = ComprehensiveReporter(self.config, self.logger)
+                    sample_name = getattr(self.config, 'sample_name', 'sample')
+                    comprehensive_report = reporter.generate_comprehensive_report(self.config.root_output, results, sample_name)
+                    self.pipeline_state['comprehensive_report'] = {'success': True, 'results': comprehensive_report}
                     self._save_state()
+                    results['comprehensive_report'] = comprehensive_report
                 else:
-                    self.logger.info("Skipping comprehensive report (--skip-report)")
-                    preprocessing_report = None
-                results['preprocessing_report'] = preprocessing_report
+                    self.logger.info("Skipping comprehensive report (--skip-comprehensive-report specified)")
+                    results['comprehensive_report'] = None
                 self.logger.info("Preprocessing pipeline completed successfully")
                 return results
         except Exception as e:
             # Mark the current step as failed
             step = None
-            for k in ['quality_control', 'raw_reads_taxonomy', 'host_removal', 'assembly', 'contigs_taxonomy', 'coverage', 'quast', 'preprocessing_report']:
+            for k in ['quality_control', 'raw_reads_taxonomy', 'host_removal', 'assembly', 'contigs_taxonomy', 'coverage', 'quast', 'comprehensive_report']:
                 if k not in self.pipeline_state or not self.pipeline_state[k].get('success'):
                     step = k
                     break
@@ -439,33 +420,17 @@ class ViralAnnotationPipeline:
     def _run_host_removal(self, read_files: List[str], paired: bool = False) -> Dict[str, Any]:
         """
         Run host removal pipeline using Bowtie2.
-        
-        Args:
-            read_files: List of input FASTQ files (should be trimmed)
-            paired: Whether reads are paired-end
-            
-        Returns:
-            Dictionary containing host removal results
         """
         results = {}
-        
-        # Check dependencies
         if not self.host_remover.check_dependencies():
             raise RuntimeError("Host removal dependencies not available")
-        
-        # Check if host genome is provided
         host_genome = getattr(self.config, 'host_genome', None)
         bowtie2_index = getattr(self.config, 'bowtie2_index', None)
-        
         if not host_genome and not bowtie2_index:
             self.logger.warning("No host genome or Bowtie2 index provided. Skipping host removal. This may result in host contamination in the assembly.")
             self.filtered_files = self.trimmed_files if self.trimmed_files else read_files
             return {"skipped": True, "warning": "Host removal skipped: no --host-genome or --bowtie2-index provided."}
-        
-        # Use trimmed files if available, otherwise use input files
         input_files = self.trimmed_files if self.trimmed_files else read_files
-        
-        # Build or use Bowtie2 index
         if bowtie2_index:
             index_prefix = bowtie2_index
             self.logger.info(f"Using pre-built Bowtie2 index: {index_prefix}")
@@ -475,291 +440,52 @@ class ViralAnnotationPipeline:
             if not index_result.get('success'):
                 raise RuntimeError(f"Failed to build Bowtie2 index: {index_result.get('error')}")
             index_prefix = index_result.get('index_prefix')
-        
-        # Run Bowtie2 alignment
         self.logger.info("Running Bowtie2 alignment against host genome")
         bowtie2_results = self.host_remover.run_bowtie2_alignment(input_files, index_prefix, paired)
         results['bowtie2_alignment'] = bowtie2_results
-        
-        # Filter host reads
         self.logger.info("Filtering host reads")
         filter_results = self.host_remover.filter_host_reads(input_files, bowtie2_results, paired)
         results['filtering'] = filter_results
-        
         if filter_results.get('success'):
             self.filtered_files = filter_results.get('filtered_files', [])
-        
-        # Generate host removal report
-        host_report = self.host_remover.generate_host_removal_report(bowtie2_results, filter_results)
-        results['host_removal_report'] = host_report
-        
         return results
     
     def _run_raw_reads_taxonomy(self, read_files: List[str], paired: bool = False) -> Dict[str, Any]:
         """
         Run taxonomic classification on raw reads.
-        
-        Args:
-            read_files: List of input FASTQ files
-            paired: Whether reads are paired-end
-            
-        Returns:
-            Dictionary containing taxonomic classification results
         """
         results = {}
-        
-        # Check dependencies
         if not self.taxonomic_classifier.check_dependencies():
             raise RuntimeError("Taxonomic classification dependencies not available")
-        
-        # Check if Kraken2 database is specified
         kraken_db = getattr(self.config, 'kraken2_db', None)
         if not kraken_db:
             raise RuntimeError("Kraken2 database not specified for taxonomic classification")
-        
-        # Use trimmed files if available, otherwise use input files
         input_files = self.trimmed_files if self.trimmed_files else read_files
-        
-        # Run Kraken2 classification
         self.logger.info("Running Kraken2 classification on raw reads")
         kraken_results = self.taxonomic_classifier.run_kraken2(input_files, paired)
         results['kraken2'] = kraken_results
-        
-        # Create Krona visualization
         krona_file = self.taxonomic_classifier.create_krona_visualization(kraken_results)
         if krona_file:
             results['krona_visualization'] = krona_file
-        
-        # Generate taxonomic report
-        taxonomy_report = self.taxonomic_classifier.generate_taxonomic_report(kraken_results, krona_file)
-        results['taxonomic_report'] = taxonomy_report
-        
         return results
     
     def _run_contigs_taxonomy(self, contigs_file: str) -> Dict[str, Any]:
         """
         Run taxonomic classification on assembled contigs.
-        
-        Args:
-            contigs_file: Input FASTA file containing contigs
-            
-        Returns:
-            Dictionary containing taxonomic classification results
         """
         results = {}
-        
-        # Check dependencies
         if not self.taxonomic_classifier.check_dependencies():
             raise RuntimeError("Taxonomic classification dependencies not available")
-        
-        # Check if Kraken2 database is specified
         kraken_db = getattr(self.config, 'kraken2_db', None)
         if not kraken_db:
             raise RuntimeError("Kraken2 database not specified for taxonomic classification")
-        
-        # Run Kraken2 classification
         self.logger.info("Running Kraken2 classification on assembled contigs")
         kraken_results = self.taxonomic_classifier.run_kraken2([contigs_file], paired=False)
         results['kraken2'] = kraken_results
-        
-        # Create Krona visualization
         krona_file = self.taxonomic_classifier.create_krona_visualization(kraken_results)
         if krona_file:
             results['krona_visualization'] = krona_file
-        
-        # Generate taxonomic report
-        taxonomy_report = self.taxonomic_classifier.generate_taxonomic_report(kraken_results, krona_file)
-        results['taxonomic_report'] = taxonomy_report
-        
         return results
-    
-    def _generate_preprocessing_report(self, results: Dict[str, Any]) -> str:
-        """
-        Generate comprehensive preprocessing report.
-        
-        Args:
-            results: Preprocessing results
-            
-        Returns:
-            Path to the preprocessing report
-        """
-        report_file = "preprocessing_report.html"
-        
-        html_content = self._create_preprocessing_html_report(results)
-        
-        with open(report_file, 'w') as f:
-            f.write(html_content)
-        
-        return report_file
-    
-    def _create_preprocessing_html_report(self, results: Dict[str, Any]) -> str:
-        """Create HTML preprocessing report."""
-        html = """
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <title>ViRAnPy Preprocessing Report</title>
-            <style>
-                body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
-                .container { max-width: 1200px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-                .header { text-align: center; border-bottom: 2px solid #007acc; padding-bottom: 20px; margin-bottom: 30px; }
-                .section { margin: 30px 0; padding: 20px; border: 1px solid #ddd; border-radius: 5px; background: #fafafa; }
-                .section h2 { color: #007acc; margin-top: 0; }
-                .metric { margin: 10px 0; padding: 8px; background: white; border-left: 4px solid #007acc; }
-                .success { color: #28a745; }
-                .warning { color: #ffc107; }
-                .error { color: #dc3545; }
-                .file-list { background: #f8f9fa; padding: 10px; border-radius: 4px; margin: 10px 0; }
-                .summary { background: #e7f3ff; padding: 15px; border-radius: 5px; margin: 20px 0; }
-            </style>
-        </head>
-        <body>
-            <div class="container">
-                <div class="header">
-                    <h1>ViRAnPy Preprocessing Report</h1>
-                    <p>Comprehensive preprocessing pipeline for viral genome annotation</p>
-                </div>
-        """
-        
-        # Add summary
-        html += """
-                <div class="summary">
-                    <h2>Pipeline Summary</h2>
-                    <p><strong>Status:</strong> <span class="success">Completed Successfully</span></p>
-                    <p><strong>Final Assembly:</strong> """ + (self.final_assembly_file or "N/A") + """</p>
-                </div>
-        """
-        
-        # Add quality control results
-        if 'quality_control' in results:
-            qc_results = results['quality_control']
-            html += """
-                <div class="section">
-                    <h2>Quality Control Results</h2>
-            """
-            
-            if 'fastqc' in qc_results:
-                html += "<h3>FastQC Analysis</h3>"
-                for file, metrics in qc_results['fastqc'].get('reports', {}).items():
-                    html += f"<div class='metric'><strong>{file}</strong></div>"
-                    for metric, value in metrics.items():
-                        html += f"<div class='metric'>{metric}: {value}</div>"
-            
-            if 'trimming' in qc_results:
-                html += "<h3>Trimming Results</h3>"
-                trimmed_files = qc_results['trimming'].get('trimmed_files', [])
-                html += f"<div class='file-list'><strong>Trimmed files:</strong><br>"
-                for file in trimmed_files:
-                    html += f"• {file}<br>"
-                html += "</div>"
-            
-            html += "</div>"
-        
-        # Add host removal results
-        if 'host_removal' in results:
-            host_results = results['host_removal']
-            html += """
-                <div class="section">
-                    <h2>Host Removal Results</h2>
-            """
-            
-            if 'bowtie2_alignment' in host_results:
-                html += "<h3>Bowtie2 Alignment</h3>"
-                for file, data in host_results['bowtie2_alignment'].get('results', {}).items():
-                    html += f"<div class='metric'><strong>{file}</strong></div>"
-                    if "statistics" in data:
-                        stats = data["statistics"]
-                        html += f"<div class='metric'>Total reads: {stats.get('total_reads', 'N/A'):,}</div>"
-                        html += f"<div class='metric'>Aligned to host: {stats.get('aligned_reads', 'N/A'):,}</div>"
-                        html += f"<div class='metric'>Unaligned (kept): {stats.get('unaligned_reads', 'N/A'):,}</div>"
-                        html += f"<div class='metric'>Host alignment rate: {stats.get('alignment_rate', 'N/A'):.2f}%</div>"
-            
-            if 'filtering' in host_results:
-                html += "<h3>Host Filtering</h3>"
-                filtered_files = host_results['filtering'].get('filtered_files', [])
-                html += f"<div class='file-list'><strong>Filtered files:</strong><br>"
-                for file in filtered_files:
-                    html += f"• {file}<br>"
-                html += "</div>"
-            
-            html += "</div>"
-        
-        # Add raw reads taxonomy results
-        if 'raw_reads_taxonomy' in results:
-            taxonomy_results = results['raw_reads_taxonomy']
-            html += """
-                <div class="section">
-                    <h2>Raw Reads Taxonomic Classification</h2>
-            """
-            
-            if 'kraken2' in taxonomy_results:
-                html += "<h3>Kraken2 Classification</h3>"
-                for file, data in taxonomy_results['kraken2'].get('results', {}).items():
-                    html += f"<div class='metric'><strong>{file}</strong></div>"
-                    for taxid, info in data.get('taxonomy', {}).items():
-                        html += f"<div class='metric'>{info['name']} ({info['rank']}) - {info['percentage']:.2f}%</div>"
-            
-            if 'krona_visualization' in taxonomy_results:
-                html += "<h3>Krona Visualization</h3>"
-                html += f"<p><a href='{taxonomy_results['krona_visualization']}' target='_blank'>Open Interactive Chart</a></p>"
-            
-            html += "</div>"
-        
-        # Add assembly results
-        if 'assembly' in results:
-            assembly_results = results['assembly']
-            html += """
-                <div class="section">
-                    <h2>Assembly Results</h2>
-            """
-            
-            for assembler, result in assembly_results.items():
-                if assembler in ['spades', 'megahit', 'hybrid']:
-                    html += f"<h3>{assembler.upper()} Assembly</h3>"
-                    if result.get('success'):
-                        html += f"<div class='metric success'>Status: Success</div>"
-                        if 'contigs_file' in result:
-                            html += f"<div class='metric'>Contigs file: {result['contigs_file']}</div>"
-                        if 'output_file' in result:
-                            html += f"<div class='metric'>Output file: {result['output_file']}</div>"
-                        if 'statistics' in result:
-                            stats = result['statistics']
-                            html += f"<div class='metric'>Total contigs: {stats.get('total_contigs', 'N/A')}</div>"
-                            html += f"<div class='metric'>Total bases: {stats.get('total_bases', 'N/A'):,}</div>"
-                    else:
-                        html += f"<div class='metric error'>Status: Failed</div>"
-                        html += f"<div class='metric error'>Error: {result.get('error', 'Unknown error')}</div>"
-            
-            html += "</div>"
-        
-        # Add contigs taxonomy results
-        if 'contigs_taxonomy' in results:
-            taxonomy_results = results['contigs_taxonomy']
-            html += """
-                <div class="section">
-                    <h2>Contigs Taxonomic Classification</h2>
-            """
-            
-            if 'kraken2' in taxonomy_results:
-                html += "<h3>Kraken2 Classification</h3>"
-                for file, data in taxonomy_results['kraken2'].get('results', {}).items():
-                    html += f"<div class='metric'><strong>{file}</strong></div>"
-                    for taxid, info in data.get('taxonomy', {}).items():
-                        html += f"<div class='metric'>{info['name']} ({info['rank']}) - {info['percentage']:.2f}%</div>"
-            
-            if 'krona_visualization' in taxonomy_results:
-                html += "<h3>Krona Visualization</h3>"
-                html += f"<p><a href='{taxonomy_results['krona_visualization']}' target='_blank'>Open Interactive Chart</a></p>"
-            
-            html += "</div>"
-        
-        html += """
-            </div>
-        </body>
-        </html>
-        """
-        
-        return html
     
     def _run_pipeline_steps(self) -> None:
         """Run all pipeline steps in sequence."""
@@ -770,24 +496,29 @@ class ViralAnnotationPipeline:
         if not getattr(self.config, 'skip_taxonomy', False) and getattr(self.config, 'taxonomy_contigs', True):
             self._run_taxonomic_classification()
         
-        # Step 3: Genome shape prediction
-        self._predict_genome_shape()
+        # Step 3: Genome shape prediction (if not skipped)
+        if not getattr(self.config, 'skip_genome_shape', False):
+            self._predict_genome_shape()
         
-        # Step 4: tRNA/tmRNA detection
-        self._detect_trna()
+        # Step 4: tRNA/tmRNA detection (if not skipped)
+        if not getattr(self.config, 'skip_trna_detection', False):
+            self._detect_trna()
         
         # Step 5: ncRNA detection (optional)
         if not self.config.non_crna:
             self._detect_ncrna()
         
-        # Step 6: CRISPR detection
-        self._detect_crispr()
+        # Step 6: CRISPR detection (if not skipped)
+        if not getattr(self.config, 'skip_crispr_detection', False):
+            self._detect_crispr()
         
-        # Step 7: Gene prediction
-        self._predict_genes()
+        # Step 7: Gene prediction (if not skipped)
+        if not getattr(self.config, 'skip_gene_prediction', False):
+            self._predict_genes()
         
-        # Step 8: Protein function prediction
-        self._predict_protein_function()
+        # Step 8: Protein function prediction (if not skipped)
+        if not getattr(self.config, 'skip_protein_function', False):
+            self._predict_protein_function()
         
         # Step 9: HMMER analysis (optional)
         if not self.config.no_hmmer:

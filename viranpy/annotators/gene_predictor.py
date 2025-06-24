@@ -24,16 +24,16 @@ class ViralGeneFinder(BaseAnnotator):
     def __init__(self, config, logger=None):
         super().__init__(config, logger)
         self.predicted_proteins = {}
-
+    
     def check_dependencies(self) -> bool:
         """Check if Prodigal or Prodigal-GV is available."""
         from ..utils.file_utils import cmd_exists
         return cmd_exists("prodigal-gv") or cmd_exists("prodigal")
-
+    
     def validate_input(self, input_file: str) -> bool:
         """Validate input FASTA file."""
         return Path(input_file).exists() and Path(input_file).suffix.lower() in ['.fasta', '.fa', '.fna']
-
+    
     def run(self, input_file: str, **kwargs) -> Dict[str, Any]:
         """
         Run viral gene prediction for all sequences in the input file.

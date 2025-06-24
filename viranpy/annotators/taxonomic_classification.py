@@ -85,17 +85,12 @@ class TaxonomicClassificationAnnotator(BaseAnnotator):
             self.logger.info("Creating Krona visualization")
             self.krona_file = self._create_krona_visualization()
             
-            # Generate taxonomic report
-            self.logger.info("Generating taxonomic classification report")
-            report_file = self._generate_taxonomic_report()
-            
             # Prepare results
             result.success = True
             result.output_files = {
                 "kraken2_report": kraken_results.get("report_file"),
                 "kraken2_output": kraken_results.get("output_file"),
                 "krona_visualization": self.krona_file,
-                "taxonomic_report": report_file
             }
             result.annotations = kraken_results.get("taxonomy", {})
             result.metadata = {
@@ -233,106 +228,4 @@ class TaxonomicClassificationAnnotator(BaseAnnotator):
         except Exception as e:
             self.logger.warning(f"Could not calculate classification statistics: {e}")
         
-        return stats
-    
-    def _generate_taxonomic_report(self) -> str:
-        """Generate a comprehensive taxonomic classification report."""
-        report_file = "contigs_taxonomic_classification_report.html"
-        
-        html_content = self._create_contigs_taxonomic_html_report()
-        
-        with open(report_file, 'w') as f:
-            f.write(html_content)
-        
-        return report_file
-    
-    def _create_contigs_taxonomic_html_report(self) -> str:
-        """Create HTML taxonomic classification report for contigs."""
-        html = """
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <title>Contigs Taxonomic Classification Report</title>
-            <style>
-                body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
-                .container { max-width: 1200px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-                .header { text-align: center; border-bottom: 2px solid #007acc; padding-bottom: 20px; margin-bottom: 30px; }
-                .section { margin: 30px 0; padding: 20px; border: 1px solid #ddd; border-radius: 5px; background: #fafafa; }
-                .section h2 { color: #007acc; margin-top: 0; }
-                .taxonomy-item { margin: 10px 0; padding: 10px; background: white; border-radius: 4px; }
-                .viral { border-left: 4px solid #28a745; background: #e8f5e8; }
-                .bacterial { border-left: 4px solid #ffc107; background: #fff3cd; }
-                .other { border-left: 4px solid #dc3545; background: #f8d7da; }
-                .stats { background: #e7f3ff; padding: 15px; border-radius: 5px; margin: 20px 0; }
-                .metric { margin: 10px 0; font-weight: bold; }
-            </style>
-        </head>
-        <body>
-            <div class="container">
-                <div class="header">
-                    <h1>Contigs Taxonomic Classification Report</h1>
-                    <p>Taxonomic analysis of assembled contigs using Kraken2</p>
-                </div>
-        """
-        
-        # Add classification statistics
-        if self.kraken_results.get("success"):
-            stats = {
-                "total_contigs": self.kraken_results.get("total_contigs", 0),
-                "classified_contigs": self.kraken_results.get("classified_contigs", 0),
-                "classification_rate": self.kraken_results.get("classification_rate", 0.0)
-            }
-            
-            html += """
-                <div class="stats">
-                    <h2>Classification Summary</h2>
-                    <div class="metric">Total contigs: """ + f"{stats['total_contigs']:,}" + """</div>
-                    <div class="metric">Classified contigs: """ + f"{stats['classified_contigs']:,}" + """</div>
-                    <div class="metric">Classification rate: """ + f"{stats['classification_rate']:.2f}%" + """</div>
-                </div>
-            """
-        
-        # Add taxonomic classification results
-        if self.kraken_results.get("success"):
-            html += """
-                <div class="section">
-                    <h2>Taxonomic Classification Results</h2>
-            """
-            
-            taxonomy = self.kraken_results.get("taxonomy", {})
-            for taxid, info in taxonomy.items():
-                # Determine classification type for styling
-                rank = info['rank'].lower()
-                if 'virus' in info['name'].lower() or rank in ['viruses', 'viral']:
-                    css_class = "viral"
-                elif rank in ['bacteria', 'bacterial', 'genus', 'species']:
-                    css_class = "bacterial"
-                else:
-                    css_class = "other"
-                
-                html += f"""
-                <div class='taxonomy-item {css_class}'>
-                    <strong>{info['name']}</strong> ({info['rank']}) - {info['percentage']:.2f}%
-                    <br><small>Reads: {info['reads']:,} | Tax reads: {info['tax_reads']:,}</small>
-                </div>
-                """
-            
-            html += "</div>"
-        
-        # Add Krona visualization link
-        if self.krona_file:
-            html += f"""
-            <div class="section">
-                <h2>Interactive Taxonomic Visualization</h2>
-                <p><a href="{self.krona_file}" target="_blank" style="color: #007acc; text-decoration: none; font-weight: bold;">Open Krona Interactive Chart</a></p>
-                <p>Click the link above to view an interactive hierarchical visualization of the taxonomic classification results.</p>
-            </div>
-            """
-        
-        html += """
-            </div>
-        </body>
-        </html>
-        """
-        
-        return html 
+        return stats 
