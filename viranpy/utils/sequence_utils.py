@@ -54,19 +54,25 @@ def rename_sequences(args, record_iter) -> Dict[str, str]:
     """
     from .file_utils import batch_iterator, string_split_by_numbers
     
+    # Use config's output directory for all files
+    output_dir = Path(args.root_output) / "sequence_preparation"
+    os.makedirs(output_dir, exist_ok=True)
+    
     new_names_sequences = {}
     counter = 1
     
     for i, batch in enumerate(batch_iterator(record_iter, 1)):
         seq_index = f"LOC_{i + 1}"
         
-        # Write temporary file
-        with open(f"{seq_index}.temp.fna", "w") as handle:
+        # Write temporary file in output directory
+        temp_file = output_dir / f"{seq_index}.temp.fna"
+        with open(temp_file, "w") as handle:
             SeqIO.write(batch, handle, "fasta")
         
         # Process and rename sequences
-        with open(f"{seq_index}.temp.fna", "r") as original, \
-             open(f"{seq_index}.fna", "w") as corrected:
+        output_file = output_dir / f"{seq_index}.fna"
+        with open(temp_file, "r") as original, \
+             open(output_file, "w") as corrected:
             
             if IUPAC:
                 sequences = SeqIO.parse(original, "fasta", IUPAC.ambiguous_dna)
@@ -82,14 +88,16 @@ def rename_sequences(args, record_iter) -> Dict[str, str]:
                 print(f"WARNING: {original_name} was renamed as {record.id}", file=os.sys.stderr)
                 SeqIO.write(record, corrected, "fasta")
         
-        # Write log file
-        with open("logfile.txt", "w") as logfile:
+        # Write log file in output directory
+        log_file = output_dir / "logfile.txt"
+        with open(log_file, "w") as logfile:
             logfile.write("#Original\tNew\n")
             for oldname in sorted(new_names_sequences, key=string_split_by_numbers):
                 logfile.write(f"{new_names_sequences[oldname]}\t{oldname}\n")
         
         # Clean up temporary file
-        os.remove(f"{seq_index}.temp.fna")
+        if temp_file.exists():
+            temp_file.unlink()
     
     return new_names_sequences
 
@@ -121,15 +129,22 @@ def get_combined_seqs(record, args, IUPAC=None) -> SeqRecord:
         )
 
 
-def write_temp_file(combined_seqs: SeqRecord, filename: str = "temporal_circular.fasta") -> None:
+def write_temp_file(combined_seqs: SeqRecord, filename: str = "temporal_circular.fasta", output_dir: str = None) -> None:
     """
     Write combined sequences to a temporary file.
     
     Args:
         combined_seqs: Combined sequence record
         filename: Output filename
+        output_dir: Output directory (optional, defaults to current directory)
     """
-    SeqIO.write(combined_seqs, filename, "fasta")
+    if output_dir:
+        output_path = Path(output_dir) / filename
+        os.makedirs(output_dir, exist_ok=True)
+    else:
+        output_path = Path(filename)
+    
+    SeqIO.write(combined_seqs, str(output_path), "fasta")
 
 
 def validate_sequence(sequence: str) -> bool:

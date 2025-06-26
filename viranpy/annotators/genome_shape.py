@@ -54,6 +54,10 @@ class ViralGenomeTopology(BaseAnnotator):
         try:
             for record in SeqIO.parse(input_file, "fasta"):
                 self._analyze_sequence_topology(record)
+            
+            # Write results to log file
+            self._write_topology_log()
+            
             result.add_annotation("topology_results", self.topology_results)
             result.add_metadata("total_sequences", len(self.topology_results))
             result.add_metadata("circular_count", sum(1 for t in self.topology_results.values() if t.get("topology") == "circular"))
@@ -70,12 +74,18 @@ class ViralGenomeTopology(BaseAnnotator):
         Analyze topology for a single viral sequence using LASTZ.
         Results are stored in self.topology_results.
         """
+        # Use config's output directory for temporary files
+        output_dir = Path(self.config.root_output) / "genome_shape"
+        os.makedirs(output_dir, exist_ok=True)
+        
         self.topology_results[record.id] = {"topology": "linear"}
         combined_seqs = get_combined_seqs(record, self.config, IUPAC)
-        write_temp_file(combined_seqs)
+        temp_file = output_dir / "temporal_circular.fasta"
+        write_temp_file(combined_seqs, "temporal_circular.fasta", str(output_dir))
+        
         try:
             output = subprocess.check_output([
-                "lastz", "temporal_circular.fasta", "--self", "--notrivial", 
+                "lastz", str(temp_file), "--self", "--notrivial", 
                 "--nomirror", "--ambiguous=iupac", 
                 "--format=general-:start1,end1,start2,end2,score,strand1,strand2,identity,length1"
             ], stderr=subprocess.PIPE, text=True)
@@ -83,8 +93,8 @@ class ViralGenomeTopology(BaseAnnotator):
         except subprocess.CalledProcessError as e:
             self.logger.warning(f"LASTZ failed for {record.id}: {e}")
         finally:
-            if os.path.exists("temporal_circular.fasta"):
-                os.remove("temporal_circular.fasta")
+            if temp_file.exists():
+                temp_file.unlink()
     
     def _parse_lastz_output(self, output: str, record: SeqRecord) -> None:
         """
@@ -112,6 +122,23 @@ class ViralGenomeTopology(BaseAnnotator):
             except (ValueError, IndexError) as e:
                 self.logger.warning(f"Failed to parse LASTZ line: {line}, error: {e}")
     
+    def _write_topology_log(self) -> None:
+        """Write topology results to a log file."""
+        output_dir = Path(self.config.root_output) / "genome_shape"
+        log_file = output_dir / "genome_topology_log.txt"
+        
+        with open(log_file, 'w') as f:
+            f.write("# Genome Topology Prediction Results\n")
+            f.write("# Sequence_ID\tTopology\tIdentity\tLength\n")
+            
+            for seq_id, result in self.topology_results.items():
+                topology = result.get("topology", "linear")
+                identity = result.get("identity", "N/A")
+                length = result.get("length", "N/A")
+                f.write(f"{seq_id}\t{topology}\t{identity}\t{length}\n")
+        
+        self.logger.info(f"Genome topology results written to: {log_file}")
+
     def get_output_files(self) -> List[str]:
         return ["genome_topology_log.txt"]
 

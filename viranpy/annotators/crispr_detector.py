@@ -45,19 +45,30 @@ class ViralCRISPRFinder(BaseAnnotator):
             max_repeat = getattr(self.config, 'max_crispr_repeat', 64)
             min_spacer = getattr(self.config, 'min_crispr_spacer', 8)
             max_spacer = getattr(self.config, 'max_crispr_spacer', 64)
-            output_file = f"crispr_results_{Path(input_file).stem}.txt"
+            
+            # Use config's output directory
+            output_dir = Path(self.config.root_output) / "crispr_detection"
+            os.makedirs(output_dir, exist_ok=True)
+            output_file = output_dir / f"crispr_results_{Path(input_file).stem}.txt"
+            
             cmd = [
-                "pilercr", "-in", input_file, "-out", output_file, "-noinfo",
+                "pilercr", "-in", input_file, "-out", str(output_file), "-noinfo",
                 "-minrepeat", str(min_repeat), "-maxrepeat", str(max_repeat),
                 "-minspacer", str(min_spacer), "-maxspacer", str(max_spacer)
             ]
             safe_run_cmd(cmd, self.logger)
-            self.crispr_results = self._parse_crispr_output(output_file)
+            self.crispr_results = self._parse_crispr_output(str(output_file))
+            
+            # Write results to log file
+            self._write_crispr_log()
+            
             result.add_annotation("crispr_results", self.crispr_results)
             result.add_metadata("total_crispr_arrays", sum(len(v) for v in self.crispr_results.values()))
             self.logger.info(f"CRISPR detection completed: {result.metadata['total_crispr_arrays']} arrays found")
-            if os.path.exists(output_file):
-                os.remove(output_file)
+            
+            # Clean up output file
+            if output_file.exists():
+                output_file.unlink()
         except Exception as e:
             result.success = False
             result.error_message = str(e)
@@ -75,7 +86,7 @@ class ViralCRISPRFinder(BaseAnnotator):
             for line in crisprfile:
                 if "SUMMARY BY POSITION" in line:
                     in_summary = True
-                            continue
+                    continue
                 if in_summary:
                     match = re.match(r"^\s+(\d+)\s+(.{16})\s+(\d+)\s+(\d+)\s+\d+\s+\d+\s+\d+\s+\d?\s+(\w+)", line)
                     if match:
@@ -92,4 +103,20 @@ class ViralCRISPRFinder(BaseAnnotator):
         return crispr_arrays
 
     def get_output_files(self) -> List[str]:
-        return [f"crispr_results_{contig_id}.txt" for contig_id in self.crispr_results.keys()] 
+        return [f"crispr_results_{contig_id}.txt" for contig_id in self.crispr_results.keys()]
+
+    def _write_crispr_log(self) -> None:
+        """Write CRISPR results to a log file."""
+        output_dir = Path(self.config.root_output) / "crispr_detection"
+        log_file = output_dir / "crispr_results.txt"
+        
+        with open(log_file, 'w') as f:
+            f.write("# CRISPR Detection Results\n")
+            f.write("# Contig_ID\tArray_Index\tStart\tEnd\tRepeat_Sequence\tRepeat_Length\n")
+            
+            for contig_id, arrays in self.crispr_results.items():
+                for i, array in enumerate(arrays):
+                    repeat_length = len(array['repeat_sequence'])
+                    f.write(f"{contig_id}\t{i+1}\t{array['start']}\t{array['end']}\t{array['repeat_sequence']}\t{repeat_length}\n")
+        
+        self.logger.info(f"CRISPR results written to: {log_file}") 

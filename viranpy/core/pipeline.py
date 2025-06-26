@@ -76,7 +76,17 @@ class ViralAnnotationPipeline:
         self.final_assembly_file = None
         
         self.resume = resume
-        self.state_file = os.path.join(getattr(config, 'root_output', 'viranpy_results'), 'pipeline_state.json')
+        # Fix the state file path to use absolute path
+        if hasattr(config, 'root_output') and config.root_output:
+            # If root_output is a relative path, make it absolute
+            if not os.path.isabs(config.root_output):
+                # Get the current working directory and construct absolute path
+                current_dir = os.getcwd()
+                self.state_file = os.path.join(current_dir, config.root_output, 'pipeline_state.json')
+            else:
+                self.state_file = os.path.join(config.root_output, 'pipeline_state.json')
+        else:
+            self.state_file = os.path.join('viranpy_results', 'pipeline_state.json')
         self.pipeline_state = self._load_state() if resume else {}
         
     def add_annotator(self, annotator: BaseAnnotator) -> None:
@@ -108,7 +118,7 @@ class ViralAnnotationPipeline:
         """
         required_cmds = ["lastz", "aragorn", "pilercr"]
         
-        if self.config.prodigal_gv:
+        if self.config.use_prodigal_gv:
             required_cmds.append("prodigal-gv")
         else:
             required_cmds.append("prodigal")
@@ -205,34 +215,75 @@ class ViralAnnotationPipeline:
                 results = {}
                 input_files = self.filtered_files if self.filtered_files else read_files
                 assembler_method = getattr(self.config, 'assembler', 'hybrid')
+                
+                # Check for existing assembly results when resuming
+                if self.resume:
+                    self.logger.info("[RESUME] Checking for existing assembly results...")
+                    
+                    # Check SPAdes results
+                    spades_output_dir = os.path.join(self.config.root_output, "spades_assembly")
+                    spades_renamed_file = os.path.join(spades_output_dir, "scaffolds_renamed.fasta")
+                    if os.path.exists(spades_renamed_file):
+                        self.logger.info(f"[RESUME] Found existing SPAdes results: {spades_renamed_file}")
+                        results['spades'] = {"success": True, "contigs_file": spades_renamed_file}
+                    else:
+                        self.logger.info("[RESUME] No existing SPAdes results found, will run SPAdes")
+                    
+                    # Check MEGAHIT results
+                    megahit_output_dir = os.path.join(self.config.root_output, "megahit_assembly")
+                    megahit_renamed_file = os.path.join(megahit_output_dir, "contigs_renamed.fasta")
+                    if os.path.exists(megahit_renamed_file):
+                        self.logger.info(f"[RESUME] Found existing MEGAHIT results: {megahit_renamed_file}")
+                        results['megahit'] = {"success": True, "contigs_file": megahit_renamed_file}
+                    else:
+                        self.logger.info("[RESUME] No existing MEGAHIT results found, will run MEGAHIT")
+                
                 if assembler_method == 'spades':
-                    self.logger.info("Running SPAdes assembly")
-                    spades_result = self.assembler.run_spades(input_files, paired)
-                    results['spades'] = spades_result
-                    if spades_result.get('success'):
-                        self.final_assembly_file = spades_result.get('contigs_file')
+                    if 'spades' not in results:  # Not found in resume check
+                        self.logger.info("Running SPAdes assembly")
+                        spades_result = self.assembler.run_spades(input_files, paired)
+                        results['spades'] = spades_result
+                    if results['spades'].get('success'):
+                        self.final_assembly_file = results['spades'].get('contigs_file')
                 elif assembler_method == 'megahit':
-                    self.logger.info("Running MEGAHIT assembly")
-                    megahit_result = self.assembler.run_megahit(input_files, paired)
-                    results['megahit'] = megahit_result
-                    if megahit_result.get('success'):
-                        self.final_assembly_file = megahit_result.get('contigs_file')
+                    if 'megahit' not in results:  # Not found in resume check
+                        self.logger.info("Running MEGAHIT assembly")
+                        # Pass resume flag to assembler
+                        self.assembler.config.resume = self.resume
+                        megahit_result = self.assembler.run_megahit(input_files, paired)
+                        results['megahit'] = megahit_result
+                    if results['megahit'].get('success'):
+                        self.final_assembly_file = results['megahit'].get('contigs_file')
                 elif assembler_method == 'hybrid':
                     self.logger.info("Running hybrid assembly (MEGAHIT + SPAdes)")
-                    megahit_result = self.assembler.run_megahit(input_files, paired)
-                    spades_result = self.assembler.run_spades(input_files, paired)
-                    results['megahit'] = megahit_result
-                    results['spades'] = spades_result
-                    if spades_result.get('success') and megahit_result.get('success'):
+                    
+                    # Run MEGAHIT if not already found
+                    if 'megahit' not in results:
+                        # Pass resume flag to assembler
+                        self.assembler.config.resume = self.resume
+                        megahit_result = self.assembler.run_megahit(input_files, paired)
+                        results['megahit'] = megahit_result
+                    else:
+                        self.logger.info("[RESUME] Using existing MEGAHIT results")
+                    
+                    # Run SPAdes if not already found
+                    if 'spades' not in results:
+                        spades_result = self.assembler.run_spades(input_files, paired)
+                        results['spades'] = spades_result
+                    else:
+                        self.logger.info("[RESUME] Using existing SPAdes results")
+                    
+                    if results['spades'].get('success') and results['megahit'].get('success'):
                         self.logger.info("Creating hybrid assembly")
                         hybrid_result = self.assembler.create_hybrid_assembly(
-                            spades_result.get('contigs_file'),
-                            megahit_result.get('contigs_file'),
+                            results['spades'].get('contigs_file'),
+                            results['megahit'].get('contigs_file'),
                             "hybrid_assembly.fasta"
                         )
                         results['hybrid'] = hybrid_result
                         if hybrid_result.get('success'):
                             self.final_assembly_file = hybrid_result.get('output_file')
+                
                 if self.final_assembly_file:
                     min_length = getattr(self.config, 'min_contig_length', 200)
                     filter_result = self.assembler.filter_contigs_by_length(
@@ -241,6 +292,23 @@ class ViralAnnotationPipeline:
                     results['filtering'] = filter_result
                     if filter_result.get('success'):
                         self.final_assembly_file = filter_result.get('output_file')
+                        # If hybrid assembly, update the contigs_file and output_file in the results for downstream use
+                        if assembler_method == 'hybrid' and 'hybrid' in results and results['hybrid'].get('success'):
+                            results['hybrid']['contigs_file'] = self.final_assembly_file
+                            results['hybrid']['output_file'] = self.final_assembly_file
+                            # Also update the pipeline state for CLI resume
+                            if 'assembly' in self.pipeline_state and 'results' in self.pipeline_state['assembly'] and 'hybrid' in self.pipeline_state['assembly']['results']:
+                                self.pipeline_state['assembly']['results']['hybrid']['contigs_file'] = self.final_assembly_file
+                                self.pipeline_state['assembly']['results']['hybrid']['output_file'] = self.final_assembly_file
+                                self.logger.info(f"[DEBUG] Updated pipeline state hybrid contigs_file to: {self.final_assembly_file}")
+                                self._save_state()
+                            else:
+                                self.logger.warning(f"[DEBUG] Could not update pipeline state - missing required keys")
+                                self.logger.warning(f"[DEBUG] pipeline_state keys: {list(self.pipeline_state.keys()) if self.pipeline_state else 'None'}")
+                                if 'assembly' in self.pipeline_state:
+                                    self.logger.warning(f"[DEBUG] assembly keys: {list(self.pipeline_state['assembly'].keys())}")
+                                    if 'results' in self.pipeline_state['assembly']:
+                                        self.logger.warning(f"[DEBUG] results keys: {list(self.pipeline_state['assembly']['results'].keys())}")
                 self.logger.info("Assembly pipeline completed successfully")
                 return results
         except Exception as e:
@@ -259,6 +327,26 @@ class ViralAnnotationPipeline:
                 self.logger.info(f"Preprocessing pipeline paired flag: {paired}")
                 self.logger.info(f"Preprocessing pipeline number of files: {len(read_files)}")
                 
+                # If resuming, restore input files from state if available
+                if self.resume and self.pipeline_state:
+                    if 'quality_control' in self.pipeline_state and self.pipeline_state['quality_control'].get('success'):
+                        # Use trimmed files from QC if available
+                        qc_results = self.pipeline_state['quality_control'].get('results', {})
+                        if 'trimming' in qc_results and qc_results['trimming'].get('success'):
+                            self.trimmed_files = qc_results['trimming'].get('trimmed_files', [])
+                            self.logger.info(f"[RESUME] Restored trimmed files from state: {self.trimmed_files}")
+                    
+                    if 'host_removal' in self.pipeline_state and self.pipeline_state['host_removal'].get('success'):
+                        # Use filtered files from host removal if available
+                        host_results = self.pipeline_state['host_removal'].get('results', {})
+                        if 'filtering' in host_results and host_results['filtering'].get('success'):
+                            self.filtered_files = host_results['filtering'].get('filtered_files', [])
+                            self.logger.info(f"[RESUME] Restored filtered files from state: {self.filtered_files}")
+                        elif host_results.get('skipped'):
+                            # Host removal was skipped, use trimmed files
+                            self.filtered_files = self.trimmed_files if self.trimmed_files else read_files
+                            self.logger.info(f"[RESUME] Host removal was skipped, using trimmed files: {self.filtered_files}")
+                
                 results = {}
                 # Step 1: Quality control
                 if self.resume and self.pipeline_state.get('quality_control', {}).get('success'):
@@ -273,6 +361,7 @@ class ViralAnnotationPipeline:
                     self.logger.info("Skipping quality control (--skip-qc)")
                     qc_results = None
                 results['quality_control'] = qc_results
+                
                 # Step 2: Taxonomic classification of raw reads
                 if self.resume and self.pipeline_state.get('raw_reads_taxonomy', {}).get('success'):
                     self.logger.info("[RESUME] Skipping raw reads taxonomy (already completed)")
@@ -286,6 +375,7 @@ class ViralAnnotationPipeline:
                     self.logger.info("Skipping raw reads taxonomy (--skip-taxonomy or not requested)")
                     taxonomy_results = None
                 results['raw_reads_taxonomy'] = taxonomy_results
+                
                 # Step 3: Host removal
                 if self.resume and self.pipeline_state.get('host_removal', {}).get('success'):
                     self.logger.info("[RESUME] Skipping host removal (already completed)")
@@ -300,13 +390,110 @@ class ViralAnnotationPipeline:
                     self.filtered_files = self.trimmed_files if self.trimmed_files else read_files
                     host_results = None
                 results['host_removal'] = host_results
+                
                 # Step 4: Assembly
                 if self.resume and self.pipeline_state.get('assembly', {}).get('success'):
                     self.logger.info("[RESUME] Skipping assembly (already completed)")
                     assembly_results = self.pipeline_state['assembly']['results']
+                    # Set final_assembly_file from the state for downstream steps
+                    if assembly_results and 'hybrid' in assembly_results and assembly_results['hybrid'].get('success'):
+                        # Check if we have a filtered file in the state
+                        if 'contigs_file' in assembly_results['hybrid']:
+                            self.final_assembly_file = assembly_results['hybrid']['contigs_file']
+                            self.logger.info(f"[RESUME] Set final_assembly_file from state: {self.final_assembly_file}")
+                        elif 'output_file' in assembly_results['hybrid']:
+                            self.final_assembly_file = assembly_results['hybrid']['output_file']
+                            self.logger.info(f"[RESUME] Set final_assembly_file from state: {self.final_assembly_file}")
+                        else:
+                            # Try to find the filtered file
+                            hybrid_dir = os.path.join(self.config.root_output, "hybrid_assembly")
+                            filtered_file = os.path.join(hybrid_dir, "hybrid_assembly_filtered.fasta")
+                            if os.path.exists(filtered_file):
+                                self.final_assembly_file = filtered_file
+                                # Update the state with the correct path
+                                assembly_results['hybrid']['contigs_file'] = filtered_file
+                                assembly_results['hybrid']['output_file'] = filtered_file
+                                self.pipeline_state['assembly']['results'] = assembly_results
+                                self.logger.info(f"[RESUME] Found and set filtered file: {self.final_assembly_file}")
+                                self.logger.info(f"[DEBUG] Updated pipeline state hybrid contigs_file to: {self.final_assembly_file}")
+                                self._save_state()
+                            else:
+                                self.logger.warning(f"[RESUME] Could not find filtered hybrid assembly file")
+                    elif assembly_results and 'spades' in assembly_results and assembly_results['spades'].get('success'):
+                        self.final_assembly_file = assembly_results['spades'].get('contigs_file')
+                        self.logger.info(f"[RESUME] Set final_assembly_file from SPAdes state: {self.final_assembly_file}")
+                    elif assembly_results and 'megahit' in assembly_results and assembly_results['megahit'].get('success'):
+                        self.final_assembly_file = assembly_results['megahit'].get('contigs_file')
+                        self.logger.info(f"[RESUME] Set final_assembly_file from MEGAHIT state: {self.final_assembly_file}")
+                elif self.resume:
+                    # Check if individual assemblers completed successfully
+                    spades_output_dir = os.path.join(self.config.root_output, "spades_assembly")
+                    megahit_output_dir = os.path.join(self.config.root_output, "megahit_assembly")
+                    spades_renamed_file = os.path.join(spades_output_dir, "scaffolds_renamed.fasta")
+                    megahit_renamed_file = os.path.join(megahit_output_dir, "contigs_renamed.fasta")
+                    
+                    if os.path.exists(spades_renamed_file) and os.path.exists(megahit_renamed_file):
+                        self.logger.info("[RESUME] Found existing SPAdes and MEGAHIT results, will attempt hybrid assembly")
+                        # Use the appropriate input files for assembly
+                        assembly_input_files = self.filtered_files if self.filtered_files else (self.trimmed_files if self.trimmed_files else read_files)
+                        self.logger.info(f"Assembly input files: {assembly_input_files}")
+                        self.logger.info(f"Assembly input files type: {type(assembly_input_files)}")
+                        self.logger.info(f"Assembly input files length: {len(assembly_input_files) if assembly_input_files else 0}")
+                        
+                        if not assembly_input_files:
+                            raise RuntimeError("No input files available for assembly. Check if quality control and host removal completed successfully.")
+                        
+                        assembly_results = self.run_assembly(assembly_input_files, paired)
+                        
+                        # Check if assembly was truly successful
+                        assembly_success = True
+                        if assembly_results:
+                            # Check if any critical assembly step failed
+                            for assembler, result in assembly_results.items():
+                                if assembler in ['spades', 'megahit', 'hybrid'] and result and not result.get('success'):
+                                    assembly_success = False
+                                    self.logger.error(f"Assembly step '{assembler}' failed: {result.get('error', 'Unknown error')}")
+                                    break
+                        
+                        self.pipeline_state['assembly'] = {'success': assembly_success, 'results': assembly_results}
+                        self._save_state()
+                    else:
+                        self.logger.info("[RESUME] No existing assembly results found, will run full assembly")
+                        # Use the appropriate input files for assembly
+                        assembly_input_files = self.filtered_files if self.filtered_files else (self.trimmed_files if self.trimmed_files else read_files)
+                        self.logger.info(f"Assembly input files: {assembly_input_files}")
+                        self.logger.info(f"Assembly input files type: {type(assembly_input_files)}")
+                        self.logger.info(f"Assembly input files length: {len(assembly_input_files) if assembly_input_files else 0}")
+                        
+                        if not assembly_input_files:
+                            raise RuntimeError("No input files available for assembly. Check if quality control and host removal completed successfully.")
+                        
+                        assembly_results = self.run_assembly(assembly_input_files, paired)
+                        
+                        # Check if assembly was truly successful
+                        assembly_success = True
+                        if assembly_results:
+                            # Check if any critical assembly step failed
+                            for assembler, result in assembly_results.items():
+                                if assembler in ['spades', 'megahit', 'hybrid'] and result and not result.get('success'):
+                                    assembly_success = False
+                                    self.logger.error(f"Assembly step '{assembler}' failed: {result.get('error', 'Unknown error')}")
+                                    break
+                        
+                        self.pipeline_state['assembly'] = {'success': assembly_success, 'results': assembly_results}
+                        self._save_state()
                 else:
                     self.logger.info("Step 4: Assembly")
-                    assembly_results = self.run_assembly(self.filtered_files, paired)
+                    # Use the appropriate input files for assembly
+                    assembly_input_files = self.filtered_files if self.filtered_files else (self.trimmed_files if self.trimmed_files else read_files)
+                    self.logger.info(f"Assembly input files: {assembly_input_files}")
+                    self.logger.info(f"Assembly input files type: {type(assembly_input_files)}")
+                    self.logger.info(f"Assembly input files length: {len(assembly_input_files) if assembly_input_files else 0}")
+                    
+                    if not assembly_input_files:
+                        raise RuntimeError("No input files available for assembly. Check if quality control and host removal completed successfully.")
+                    
+                    assembly_results = self.run_assembly(assembly_input_files, paired)
                     
                     # Check if assembly was truly successful
                     assembly_success = True
@@ -321,6 +508,7 @@ class ViralAnnotationPipeline:
                     self.pipeline_state['assembly'] = {'success': assembly_success, 'results': assembly_results}
                     self._save_state()
                 results['assembly'] = assembly_results
+                
                 # Step 5: Taxonomic classification of contigs
                 if self.resume and self.pipeline_state.get('contigs_taxonomy', {}).get('success'):
                     self.logger.info("[RESUME] Skipping contigs taxonomy (already completed)")
@@ -344,6 +532,7 @@ class ViralAnnotationPipeline:
                     self.logger.info("Skipping contigs taxonomy (--skip-taxonomy or not requested)")
                     contigs_taxonomy_results = None
                 results['contigs_taxonomy'] = contigs_taxonomy_results
+                
                 # Step 6: Coverage analysis
                 if self.resume and self.pipeline_state.get('coverage', {}).get('success'):
                     self.logger.info("[RESUME] Skipping coverage analysis (already completed)")
@@ -357,7 +546,7 @@ class ViralAnnotationPipeline:
                             self.final_assembly_file,
                             self.filtered_files,
                             paired,
-                            "coverage_results"
+                            os.path.join(self.config.root_output, "coverage_results")
                         )
                         self.pipeline_state['coverage'] = {'success': True, 'results': coverage_results}
                         self._save_state()
@@ -368,6 +557,7 @@ class ViralAnnotationPipeline:
                     self.logger.info("Skipping coverage analysis (--skip-coverage-analysis specified)")
                     coverage_results = None
                 results['coverage'] = coverage_results
+                
                 # Step 7: QUAST analysis
                 if self.resume and self.pipeline_state.get('quast', {}).get('success'):
                     self.logger.info("[RESUME] Skipping QUAST analysis (already completed)")
@@ -379,7 +569,7 @@ class ViralAnnotationPipeline:
                         quast_calc = AssemblyStatsCalculator(self.config, self.logger)
                         quast_results = quast_calc.run_quast_analysis(
                             self.final_assembly_file,
-                            "quast_results"
+                            os.path.join(self.config.root_output, "quast_results")
                         )
                         self.pipeline_state['quast'] = {'success': True, 'results': quast_results}
                         self._save_state()
@@ -390,6 +580,7 @@ class ViralAnnotationPipeline:
                     self.logger.info("Skipping QUAST analysis (--skip-quast-analysis specified)")
                     quast_results = None
                 results['quast'] = quast_results
+                
                 # Step 8: Comprehensive reporting
                 if not getattr(self.config, 'skip_comprehensive_report', False):
                     from ..utils.comprehensive_reporter import ComprehensiveReporter
@@ -407,7 +598,7 @@ class ViralAnnotationPipeline:
         except Exception as e:
             # Mark the current step as failed
             step = None
-            for k in ['quality_control', 'raw_reads_taxonomy', 'host_removal', 'assembly', 'contigs_taxonomy', 'coverage', 'quast', 'comprehensive_report']:
+            for k in ['taxonomic_classification', 'assembly', 'contigs_taxonomy', 'coverage', 'quast', 'comprehensive_report']:
                 if k not in self.pipeline_state or not self.pipeline_state[k].get('success'):
                     step = k
                     break
@@ -489,36 +680,103 @@ class ViralAnnotationPipeline:
     
     def _run_pipeline_steps(self) -> None:
         """Run all pipeline steps in sequence."""
-        # Step 1: Sequence preparation
-        self._prepare_sequences()
-        
-        # Step 2: Taxonomic classification (if enabled)
+        # Step 1: Taxonomic classification (if enabled, on original contigs)
         if not getattr(self.config, 'skip_taxonomy', False) and getattr(self.config, 'taxonomy_contigs', True):
-            self._run_taxonomic_classification()
+            # Check if taxonomic classification was already completed when resuming
+            if self.resume and self.pipeline_state:
+                if 'taxonomic_classification' in self.pipeline_state and self.pipeline_state['taxonomic_classification'].get('success'):
+                    self.logger.info("[RESUME] Taxonomic classification already completed, skipping...")
+                else:
+                    self.logger.info(f"[DEBUG] About to run taxonomy. config.input_file: {self.config.input_file}")
+                    self.logger.info(f"[DEBUG] final_assembly_file: {getattr(self, 'final_assembly_file', 'Not set')}")
+                    self._run_taxonomic_classification()
+            else:
+                self.logger.info(f"[DEBUG] About to run taxonomy. config.input_file: {self.config.input_file}")
+                self.logger.info(f"[DEBUG] final_assembly_file: {getattr(self, 'final_assembly_file', 'Not set')}")
+                self._run_taxonomic_classification()
+        
+        # Step 2: Sequence preparation (only for annotation-only mode, skip if coming from assembly)
+        if hasattr(self, 'final_assembly_file') and self.final_assembly_file:
+            # We have assembly results, skip sequence preparation
+            self.logger.info("Skipping sequence preparation - using validated contigs from assembly")
+        else:
+            # Annotation-only mode, need to prepare sequences
+            self._prepare_sequences()
         
         # Step 3: Genome shape prediction (if not skipped)
         if not getattr(self.config, 'skip_genome_shape', False):
-            self._predict_genome_shape()
+            # Check if genome shape prediction was already completed when resuming
+            if self.resume and self.pipeline_state:
+                self.logger.info(f"[DEBUG] Resume mode: {self.resume}")
+                self.logger.info(f"[DEBUG] Pipeline state keys: {list(self.pipeline_state.keys())}")
+                self.logger.info(f"[DEBUG] Genome shape in state: {'genome_shape' in self.pipeline_state}")
+                if 'genome_shape' in self.pipeline_state:
+                    self.logger.info(f"[DEBUG] Genome shape state: {self.pipeline_state['genome_shape']}")
+                
+                if 'genome_shape' in self.pipeline_state and self.pipeline_state['genome_shape'].get('success'):
+                    self.logger.info("[RESUME] Genome shape prediction already completed, skipping...")
+                else:
+                    self.logger.info("[DEBUG] Genome shape not found in state or not successful, running...")
+                    self._run_genome_shape_prediction()
+            else:
+                self.logger.info("[DEBUG] Not in resume mode or no pipeline state, running genome shape...")
+                self._run_genome_shape_prediction()
         
         # Step 4: tRNA/tmRNA detection (if not skipped)
         if not getattr(self.config, 'skip_trna_detection', False):
-            self._detect_trna()
+            # Check if tRNA detection was already completed when resuming
+            if self.resume and self.pipeline_state:
+                if 'trna_detection' in self.pipeline_state and self.pipeline_state['trna_detection'].get('success'):
+                    self.logger.info("[RESUME] tRNA/tmRNA detection already completed, skipping...")
+                else:
+                    self._run_trna_detection()
+            else:
+                self._run_trna_detection()
         
         # Step 5: ncRNA detection (optional)
         if not self.config.non_crna:
-            self._detect_ncrna()
+            # Check if ncRNA detection was already completed when resuming
+            if self.resume and self.pipeline_state:
+                self.logger.info(f"[DEBUG] Resume mode: {self.resume}")
+                self.logger.info(f"[DEBUG] Pipeline state keys: {list(self.pipeline_state.keys())}")
+                self.logger.info(f"[DEBUG] ncRNA detection in state: {'ncrna_detection' in self.pipeline_state}")
+                if 'ncrna_detection' in self.pipeline_state:
+                    self.logger.info(f"[DEBUG] ncRNA detection state: {self.pipeline_state['ncrna_detection']}")
+                
+                if 'ncrna_detection' in self.pipeline_state and self.pipeline_state['ncrna_detection'].get('success'):
+                    self.logger.info("[RESUME] ncRNA detection already completed, skipping...")
+                else:
+                    self.logger.info("[DEBUG] ncRNA detection not found in state or not successful, running...")
+                    self._run_ncrna_detection()
+            else:
+                self.logger.info("[DEBUG] Not in resume mode or no pipeline state, running ncRNA detection...")
+                self._run_ncrna_detection()
         
         # Step 6: CRISPR detection (if not skipped)
         if not getattr(self.config, 'skip_crispr_detection', False):
-            self._detect_crispr()
+            # Check if CRISPR detection was already completed when resuming
+            if self.resume and self.pipeline_state:
+                if 'crispr_detection' in self.pipeline_state and self.pipeline_state['crispr_detection'].get('success'):
+                    self.logger.info("[RESUME] CRISPR detection already completed, skipping...")
+                else:
+                    self._run_crispr_detection()
+            else:
+                self._run_crispr_detection()
         
         # Step 7: Gene prediction (if not skipped)
         if not getattr(self.config, 'skip_gene_prediction', False):
-            self._predict_genes()
+            # Check if gene prediction was already completed when resuming
+            if self.resume and self.pipeline_state:
+                if 'gene_prediction' in self.pipeline_state and self.pipeline_state['gene_prediction'].get('success'):
+                    self.logger.info("[RESUME] Gene prediction already completed, skipping...")
+                else:
+                    self._run_gene_prediction()
+            else:
+                self._run_gene_prediction()
         
         # Step 8: Protein function prediction (if not skipped)
         if not getattr(self.config, 'skip_protein_function', False):
-            self._predict_protein_function()
+            self._run_protein_function_prediction()
         
         # Step 9: HMMER analysis (optional)
         if not self.config.no_hmmer:
@@ -529,47 +787,241 @@ class ViralAnnotationPipeline:
         with PipelineLogger("Sequence preparation", self.logger):
             from Bio import SeqIO
             from ..utils.sequence_utils import rename_sequences
+            import os
             
-            record_iter = SeqIO.parse(open(self.config.input_file, "r"), "fasta")
-            rename_sequences(self.config, record_iter)
+            # Skip sequence renaming to preserve original contig names
+            self.logger.info("Skipping sequence renaming to preserve original contig names")
             
-            self.logger.info("Sequences prepared successfully")
+            # Create sequence preparation directory even when skipping renaming
+            output_dir = os.path.join(self.config.root_output, "sequence_preparation")
+            os.makedirs(output_dir, exist_ok=True)
+            
+            # Count all sequences in the input file
+            try:
+                with open(self.config.input_file, "r") as f:
+                    record_count = 0
+                    for record in SeqIO.parse(f, "fasta"):
+                        record_count += 1
+                self.logger.info(f"Sequence preparation completed - validated {record_count} sequences (preserving original names)")
+            except Exception as e:
+                self.logger.error(f"Error validating sequences: {e}")
+                raise
+            
+            self.logger.info("Sequences prepared successfully (original names preserved)")
     
-    def _predict_genome_shape(self) -> None:
+    def _run_genome_shape_prediction(self) -> None:
         """Predict genome shape using LASTZ."""
         with PipelineLogger("Genome shape prediction", self.logger):
-            # This would be implemented with a GenomeShapePredictor class
-            self.logger.info("Genome shape prediction completed")
+            try:
+                from ..annotators.genome_shape import ViralGenomeTopology
+                
+                # Create the genome shape predictor
+                genome_shape_predictor = ViralGenomeTopology(self.config, self.logger)
+                
+                # Run genome shape prediction
+                result = genome_shape_predictor.run(self.config.input_file)
+                
+                if result.get('success'):
+                    self.logger.info(f"Genome shape prediction completed successfully: {result.get('metadata', {}).get('total_sequences', 0)} sequences analyzed")
+                    # Store results
+                    self.result.add_annotation_result(AnnotationResult(
+                        annotator_name="GenomeShapePrediction",
+                        input_file=self.config.input_file,
+                        success=True,
+                        annotations=result.get('annotations', {}),
+                        metadata=result.get('metadata', {})
+                    ))
+                    # Update pipeline state for resume functionality
+                    if not hasattr(self, 'pipeline_state'):
+                        self.pipeline_state = {}
+                    self.pipeline_state['genome_shape'] = {
+                        'success': True,
+                        'metadata': result.get('metadata', {})
+                    }
+                    self._save_state()
+                else:
+                    self.logger.warning(f"Genome shape prediction failed: {result.get('error_message', 'Unknown error')}")
+                    
+            except Exception as e:
+                self.logger.error(f"Genome shape prediction failed: {e}")
+                raise
     
-    def _detect_trna(self) -> None:
+    def _run_trna_detection(self) -> None:
         """Detect tRNA and tmRNA sequences."""
         with PipelineLogger("tRNA/tmRNA detection", self.logger):
-            # This would be implemented with a TRNADetector class
-            self.logger.info("tRNA/tmRNA detection completed")
+            try:
+                from ..annotators.trna_detector import ViralTRNAFinder
+                
+                # Create the tRNA detector
+                trna_detector = ViralTRNAFinder(self.config, self.logger)
+                
+                # Run tRNA detection
+                result = trna_detector.run(self.config.input_file)
+                
+                if result.get('success'):
+                    self.logger.info(f"tRNA/tmRNA detection completed successfully: {result.get('metadata', {}).get('total_trna', 0)} tRNAs found")
+                    # Store results
+                    self.result.add_annotation_result(AnnotationResult(
+                        annotator_name="TRNADetection",
+                        input_file=self.config.input_file,
+                        success=True,
+                        annotations=result.get('annotations', {}),
+                        metadata=result.get('metadata', {})
+                    ))
+                    # Update pipeline state for resume functionality
+                    if not hasattr(self, 'pipeline_state'):
+                        self.pipeline_state = {}
+                    self.pipeline_state['trna_detection'] = {
+                        'success': True,
+                        'metadata': result.get('metadata', {})
+                    }
+                    self._save_state()
+                else:
+                    self.logger.warning(f"tRNA/tmRNA detection failed: {result.get('error_message', 'Unknown error')}")
+                    
+            except Exception as e:
+                self.logger.error(f"tRNA/tmRNA detection failed: {e}")
+                raise
     
-    def _detect_ncrna(self) -> None:
+    def _run_ncrna_detection(self) -> None:
         """Detect ncRNA sequences using RFAM."""
         with PipelineLogger("ncRNA detection", self.logger):
-            # This would be implemented with a NCRNADetector class
-            self.logger.info("ncRNA detection completed")
+            try:
+                from ..annotators.ncrna_detector import ViralNcRNAFinder
+                
+                # Create the ncRNA detector
+                ncrna_detector = ViralNcRNAFinder(self.config, self.logger)
+                
+                # Run ncRNA detection
+                result = ncrna_detector.run(self.config.input_file)
+                
+                if result.get('success'):
+                    self.logger.info(f"ncRNA detection completed successfully: {result.get('metadata', {}).get('total_ncrna', 0)} ncRNAs found")
+                    # Store results
+                    self.result.add_annotation_result(AnnotationResult(
+                        annotator_name="NCRNADetection",
+                        input_file=self.config.input_file,
+                        success=True,
+                        annotations=result.get('annotations', {}),
+                        metadata=result.get('metadata', {})
+                    ))
+                    # Update pipeline state for resume functionality
+                    if not hasattr(self, 'pipeline_state'):
+                        self.pipeline_state = {}
+                    self.pipeline_state['ncrna_detection'] = {
+                        'success': True,
+                        'metadata': result.get('metadata', {})
+                    }
+                    self._save_state()
+                else:
+                    self.logger.warning(f"ncRNA detection failed: {result.get('error_message', 'Unknown error')}")
+                    
+            except Exception as e:
+                self.logger.error(f"ncRNA detection failed: {e}")
+                raise
     
-    def _detect_crispr(self) -> None:
+    def _run_crispr_detection(self) -> None:
         """Detect CRISPR repeats using PILER-CR."""
         with PipelineLogger("CRISPR detection", self.logger):
-            # This would be implemented with a CRISPRDetector class
-            self.logger.info("CRISPR detection completed")
+            try:
+                from ..annotators.crispr_detector import ViralCRISPRFinder
+                
+                # Create the CRISPR detector
+                crispr_detector = ViralCRISPRFinder(self.config, self.logger)
+                
+                # Run CRISPR detection
+                result = crispr_detector.run(self.config.input_file)
+                
+                if result.get('success'):
+                    self.logger.info(f"CRISPR detection completed successfully: {result.get('metadata', {}).get('total_crispr_arrays', 0)} CRISPR arrays found")
+                    # Store results
+                    self.result.add_annotation_result(AnnotationResult(
+                        annotator_name="CRISPRDetection",
+                        input_file=self.config.input_file,
+                        success=True,
+                        annotations=result.get('annotations', {}),
+                        metadata=result.get('metadata', {})
+                    ))
+                    # Update pipeline state for resume functionality
+                    if not hasattr(self, 'pipeline_state'):
+                        self.pipeline_state = {}
+                    self.pipeline_state['crispr_detection'] = {
+                        'success': True,
+                        'metadata': result.get('metadata', {})
+                    }
+                    self._save_state()
+                else:
+                    self.logger.warning(f"CRISPR detection failed: {result.get('error_message', 'Unknown error')}")
+                    
+            except Exception as e:
+                self.logger.error(f"CRISPR detection failed: {e}")
+                raise
     
-    def _predict_genes(self) -> None:
+    def _run_gene_prediction(self) -> None:
         """Predict genes using Prodigal."""
         with PipelineLogger("Gene prediction", self.logger):
-            # This would be implemented with a GenePredictor class
-            self.logger.info("Gene prediction completed")
+            try:
+                from ..annotators.gene_predictor import ViralGeneFinder
+                
+                # Create the gene predictor
+                gene_predictor = ViralGeneFinder(self.config, self.logger)
+                
+                # Run gene prediction
+                result = gene_predictor.run(self.config.input_file)
+                
+                if result.get('success'):
+                    self.logger.info(f"Gene prediction completed successfully: {result.get('metadata', {}).get('total_genes', 0)} genes found")
+                    # Store results
+                    self.result.add_annotation_result(AnnotationResult(
+                        annotator_name="GenePrediction",
+                        input_file=self.config.input_file,
+                        success=True,
+                        annotations=result.get('annotations', {}),
+                        metadata=result.get('metadata', {})
+                    ))
+                    # Update pipeline state for resume functionality
+                    if not hasattr(self, 'pipeline_state'):
+                        self.pipeline_state = {}
+                    self.pipeline_state['gene_prediction'] = {
+                        'success': True,
+                        'metadata': result.get('metadata', {})
+                    }
+                    self._save_state()
+                else:
+                    self.logger.warning(f"Gene prediction failed: {result.get('error_message', 'Unknown error')}")
+                    
+            except Exception as e:
+                self.logger.error(f"Gene prediction failed: {e}")
+                raise
     
-    def _predict_protein_function(self) -> None:
+    def _run_protein_function_prediction(self) -> None:
         """Predict protein function using BLAST or DIAMOND."""
         with PipelineLogger("Protein function prediction", self.logger):
-            # This would be implemented with a ProteinFunctionPredictor class
-            self.logger.info("Protein function prediction completed")
+            try:
+                from ..annotators.protein_function_predictor import ViralProteinAnnotator
+                
+                # Create the protein function predictor
+                protein_predictor = ViralProteinAnnotator(self.config, self.logger)
+                
+                # Run protein function prediction
+                result = protein_predictor.run(self.config.input_file)
+                
+                if result.get('success'):
+                    self.logger.info(f"Protein function prediction completed successfully: {result.get('metadata', {}).get('total_proteins', 0)} proteins annotated")
+                    # Store results
+                    self.result.add_annotation_result(AnnotationResult(
+                        annotator_name="ProteinFunctionPrediction",
+                        input_file=self.config.input_file,
+                        success=True,
+                        annotations=result.get('annotations', {}),
+                        metadata=result.get('metadata', {})
+                    ))
+                else:
+                    self.logger.warning(f"Protein function prediction failed: {result.get('error_message', 'Unknown error')}")
+                    
+            except Exception as e:
+                self.logger.error(f"Protein function prediction failed: {e}")
+                raise
     
     def _run_hmmer_analysis(self) -> None:
         """Run HMMER analysis for protein function refinement."""
@@ -683,21 +1135,69 @@ class ViralAnnotationPipeline:
         self.result = PipelineResult(**results_data["results"])
         self.logger.info(f"Results loaded from {input_file}")
     
-    def _run_taxonomic_classification(self) -> None:
+    def _run_taxonomic_classification(self) -> Dict[str, Any]:
         """Run taxonomic classification on contigs."""
         with PipelineLogger("Taxonomic classification", self.logger):
-            from ..annotators import TaxonomicClassificationAnnotator
-            
-            annotator = TaxonomicClassificationAnnotator(self.config, self.logger)
-            result = annotator.annotate(self.config.input_file)
-            
-            if result.success:
-                self.logger.info("Taxonomic classification completed successfully")
-                # Store results for later use
-                self.result.annotations["taxonomic_classification"] = result.annotations
-                self.result.output_files.update(result.output_files)
-            else:
-                self.logger.warning(f"Taxonomic classification failed: {result.error_message}")
+            try:
+                from ..annotators.taxonomic_classification import TaxonomicClassificationAnnotator
+                import os
+                
+                # Determine the correct input file for taxonomy
+                # Priority: final_assembly_file > config.input_file
+                input_file = None
+                if hasattr(self, 'final_assembly_file') and self.final_assembly_file and os.path.exists(self.final_assembly_file):
+                    input_file = self.final_assembly_file
+                    self.logger.info(f"[DEBUG] Using final assembly file for taxonomy: {input_file}")
+                elif self.config.input_file and os.path.exists(self.config.input_file):
+                    input_file = self.config.input_file
+                    self.logger.info(f"[DEBUG] Using config input file for taxonomy: {input_file}")
+                else:
+                    self.logger.error(f"[DEBUG] No valid input file found for taxonomy")
+                    self.logger.error(f"[DEBUG] final_assembly_file: {getattr(self, 'final_assembly_file', 'Not set')}")
+                    self.logger.error(f"[DEBUG] config.input_file: {self.config.input_file}")
+                    return {"success": False, "error": "No valid input file found for taxonomy"}
+                
+                kraken_db = getattr(self.config, 'kraken2_db', None)
+                file_exists = os.path.exists(input_file)
+                file_size = os.path.getsize(input_file) if file_exists else 0
+                self.logger.info(f"[DEBUG] Taxonomic classification input file: {input_file}")
+                self.logger.info(f"[DEBUG] Input file exists: {file_exists}, size: {file_size} bytes")
+                self.logger.info(f"[DEBUG] Kraken2 DB: {kraken_db}")
+                
+                if not file_exists:
+                    self.logger.error(f"[DEBUG] Input file does not exist: {input_file}")
+                    return {"success": False, "error": f"Input file does not exist: {input_file}"}
+                
+                if file_size == 0:
+                    self.logger.error(f"[DEBUG] Input file is empty: {input_file}")
+                    return {"success": False, "error": f"Input file is empty: {input_file}"}
+                
+                self.logger.info(f"[DEBUG] Creating TaxonomicClassificationAnnotator...")
+                annotator = TaxonomicClassificationAnnotator(self.config, self.logger)
+                self.logger.info(f"[DEBUG] TaxonomicClassificationAnnotator created successfully")
+                
+                self.logger.info(f"[DEBUG] Calling annotator.annotate({input_file})...")
+                result = annotator.annotate(input_file)
+                self.logger.info(f"[DEBUG] annotator.annotate() completed, success: {result.success}")
+                
+                if result.success:
+                    self.logger.info("Taxonomic classification completed successfully")
+                    # Store results for later use - use the correct PipelineResult structure
+                    # Add the annotation result to the pipeline results
+                    self.result.add_annotation_result(result)
+                    # Also store in metadata for easy access
+                    if not hasattr(self.result, 'metadata'):
+                        self.result.metadata = {}
+                    self.result.metadata["taxonomic_classification"] = result.to_dict()
+                else:
+                    self.logger.warning(f"Taxonomic classification failed: {result.error_message}")
+                return result.to_dict()
+                
+            except Exception as e:
+                import traceback
+                self.logger.error(f"[DEBUG] Exception in _run_taxonomic_classification: {e}")
+                self.logger.error(f"[DEBUG] Traceback: {traceback.format_exc()}")
+                return {"success": False, "error": str(e)}
     
     def _save_state(self):
         os.makedirs(os.path.dirname(self.state_file), exist_ok=True)

@@ -1,0 +1,53 @@
+{
+  "quality_control": {
+    "success": true,
+    "results": {
+      "fastqc": {
+        "success": true,
+        "reports": {}
+      },
+      "trimming": {
+        "success": false,
+        "error": "Command '['trim_galore', '--quality', '20', '--length', '20', '--output_dir', 'viranpy_results/trimmed_reads', '--cores', '12', '--paired', 'data/25-918_S1_L001_R1_001.fastq.gz', 'data/25-918_S1_L001_R2_001.fastq.gz']' returned non-zero exit status 255."
+      }
+    }
+  },
+  "raw_reads_taxonomy": {
+    "success": true,
+    "results": {
+      "kraken2": {
+        "success": true,
+        "results": {
+          "data/25-918_S1_L001_R1_001.fastq.gz": {
+            "taxonomy": {},
+            "summary": {}
+          }
+        }
+      }
+    }
+  },
+  "host_removal": {
+    "success": true,
+    "results": {
+      "skipped": true,
+      "warning": "Host removal skipped: no --host-genome or --bowtie2-index provided."
+    }
+  },
+  "assembly": {
+    "success": false,
+    "results": {
+      "megahit": {
+        "success": false,
+        "error": "Command '['megahit', '-o', 'viranpy_results/megahit_assembly', '-t', '12', '-m', '17179869184', '-1', 'data/25-918_S1_L001_R1_001.fastq.gz', '-2', 'data/25-918_S1_L001_R2_001.fastq.gz']' returned non-zero exit status 1."
+      },
+      "spades": {
+        "success": false,
+        "error": "Command '['spades.py', '--meta', '-o', 'viranpy_results/spades_assembly', '--threads', '12', '--memory', '16', '-1', 'data/25-918_S1_L001_R1_001.fastq.gz', '-2', 'data/25-918_S1_L001_R2_001.fastq.gz']' returned non-zero exit status 255."
+      }
+    }
+  },
+  "comprehensive_report": {
+    "success": true,
+    "results": ""
+  }
+}

@@ -1,0 +1,67 @@
+2025-06-26 15:16:22 - viranpy - INFO - Running full metagenomic pipeline: preprocessing, assembly, and viral annotation...
+2025-06-26 15:16:22 - viranpy - INFO - Starting: Preprocessing Pipeline
+2025-06-26 15:16:22 - viranpy - INFO - Preprocessing pipeline input files: ['data/25-918_S1_L001_R1_001.fastq.gz', 'data/25-918_S1_L001_R2_001.fastq.gz']
+2025-06-26 15:16:22 - viranpy - INFO - Preprocessing pipeline paired flag: True
+2025-06-26 15:16:22 - viranpy - INFO - Preprocessing pipeline number of files: 2
+2025-06-26 15:16:22 - viranpy - INFO - Step 1: Quality control
+2025-06-26 15:16:22 - viranpy - INFO - Starting: Quality Control Pipeline
+2025-06-26 15:16:22 - viranpy - INFO - Running FastQC quality assessment
+2025-06-26 15:16:23 - viranpy - INFO - FastQC completed for 2 files
+2025-06-26 15:16:23 - viranpy - INFO - Running Trim Galore quality trimming
+2025-06-26 15:16:23 - viranpy - INFO - Trim Galore input files: ['data/25-918_S1_L001_R1_001.fastq.gz', 'data/25-918_S1_L001_R2_001.fastq.gz']
+2025-06-26 15:16:23 - viranpy - INFO - Trim Galore paired mode: True
+2025-06-26 15:16:23 - viranpy - INFO - Trim Galore command: trim_galore --quality 20 --length 20 --output_dir viranpy_results/trimmed_reads --cores 12 --paired data/25-918_S1_L001_R1_001.fastq.gz data/25-918_S1_L001_R2_001.fastq.gz
+2025-06-26 15:16:26 - viranpy - ERROR - Trim Galore failed: Command '['trim_galore', '--quality', '20', '--length', '20', '--output_dir', 'viranpy_results/trimmed_reads', '--cores', '12', '--paired', 'data/25-918_S1_L001_R1_001.fastq.gz', 'data/25-918_S1_L001_R2_001.fastq.gz']' returned non-zero exit status 255.
+2025-06-26 15:16:26 - viranpy - INFO - Quality control pipeline completed successfully
+2025-06-26 15:16:26 - viranpy - INFO - Completed: Quality Control Pipeline (took 3.63 seconds)
+2025-06-26 15:16:26 - viranpy - INFO - Step 2: Taxonomic classification of raw reads
+2025-06-26 15:16:26 - viranpy - INFO - Running Kraken2 classification on raw reads
+2025-06-26 15:16:26 - viranpy - INFO - Kraken2 input files: ['data/25-918_S1_L001_R1_001.fastq.gz', 'data/25-918_S1_L001_R2_001.fastq.gz']
+2025-06-26 15:16:26 - viranpy - INFO - Kraken2 paired mode: True
+2025-06-26 15:16:26 - viranpy - INFO - Kraken2 number of input files: 2
+2025-06-26 15:16:26 - viranpy - INFO - Kraken2 paired-end command: R1=data/25-918_S1_L001_R1_001.fastq.gz, R2=data/25-918_S1_L001_R2_001.fastq.gz
+2025-06-26 15:16:26 - viranpy - INFO - Kraken2 full command: kraken2 --db /Users/naveen/miniconda3/envs/viranpy/lib/python3.8/site-packages/viranpy/databases/kraken2_viral/k2_viral_20250402 --output viranpy_results/kraken2_results/25-918_S1_L001_R1_001.fastq_kraken2.out --report viranpy_results/kraken2_results/25-918_S1_L001_R1_001.fastq_kraken2.report --threads 12 data/25-918_S1_L001_R1_001.fastq.gz data/25-918_S1_L001_R2_001.fastq.gz
+2025-06-26 15:16:26 - viranpy - INFO - Kraken2 completed for paired files: data/25-918_S1_L001_R1_001.fastq.gz and data/25-918_S1_L001_R2_001.fastq.gz
+2025-06-26 15:16:26 - viranpy - WARNING - No Kraken2 output files found for Krona visualization
+2025-06-26 15:16:26 - viranpy - INFO - Step 3: Host removal using Bowtie2
+2025-06-26 15:16:26 - viranpy - WARNING - No host genome or Bowtie2 index provided. Skipping host removal. This may result in host contamination in the assembly.
+2025-06-26 15:16:26 - viranpy - INFO - [RESUME] No existing assembly results found, will run full assembly
+2025-06-26 15:16:26 - viranpy - INFO - Assembly input files: ['data/25-918_S1_L001_R1_001.fastq.gz', 'data/25-918_S1_L001_R2_001.fastq.gz']
+2025-06-26 15:16:26 - viranpy - INFO - Assembly input files type: <class 'list'>
+2025-06-26 15:16:26 - viranpy - INFO - Assembly input files length: 2
+2025-06-26 15:16:26 - viranpy - INFO - Starting: Assembly Pipeline
+2025-06-26 15:16:26 - viranpy - INFO - [RESUME] Checking for existing assembly results...
+2025-06-26 15:16:26 - viranpy - INFO - [RESUME] No existing SPAdes results found, will run SPAdes
+2025-06-26 15:16:26 - viranpy - INFO - [RESUME] No existing MEGAHIT results found, will run MEGAHIT
+2025-06-26 15:16:26 - viranpy - INFO - Running hybrid assembly (MEGAHIT + SPAdes)
+2025-06-26 15:16:26 - viranpy - INFO - MEGAHIT input files: ['data/25-918_S1_L001_R1_001.fastq.gz', 'data/25-918_S1_L001_R2_001.fastq.gz']
+2025-06-26 15:16:26 - viranpy - INFO - MEGAHIT input files type: <class 'list'>
+2025-06-26 15:16:26 - viranpy - INFO - MEGAHIT input files length: 2
+2025-06-26 15:16:26 - viranpy - INFO - MEGAHIT paired mode: True
+2025-06-26 15:16:26 - viranpy - INFO - MEGAHIT number of input files: 2
+2025-06-26 15:16:26 - viranpy - INFO - System memory: 18.0GB, MEGAHIT memory: 16.0GB (17,179,869,184 bytes)
+2025-06-26 15:16:26 - viranpy - INFO - System memory: 18.0GB, MEGAHIT memory: 16.0GB (17,179,869,184 bytes)
+2025-06-26 15:16:26 - viranpy - INFO - MEGAHIT memory setting: 16.0GB (17,179,869,184 bytes)
+2025-06-26 15:16:26 - viranpy - INFO - MEGAHIT paired-end command: R1=data/25-918_S1_L001_R1_001.fastq.gz, R2=data/25-918_S1_L001_R2_001.fastq.gz
+2025-06-26 15:16:26 - viranpy - INFO - MEGAHIT full command: megahit -o viranpy_results/megahit_assembly -t 12 -m 17179869184 -1 data/25-918_S1_L001_R1_001.fastq.gz -2 data/25-918_S1_L001_R2_001.fastq.gz
+2025-06-26 15:16:26 - viranpy - ERROR - MEGAHIT assembly failed: Command '['megahit', '-o', 'viranpy_results/megahit_assembly', '-t', '12', '-m', '17179869184', '-1', 'data/25-918_S1_L001_R1_001.fastq.gz', '-2', 'data/25-918_S1_L001_R2_001.fastq.gz']' returned non-zero exit status 1.
+2025-06-26 15:16:26 - viranpy - INFO - SPAdes input files: ['data/25-918_S1_L001_R1_001.fastq.gz', 'data/25-918_S1_L001_R2_001.fastq.gz']
+2025-06-26 15:16:26 - viranpy - INFO - SPAdes paired mode: True
+2025-06-26 15:16:26 - viranpy - INFO - SPAdes number of input files: 2
+2025-06-26 15:16:26 - viranpy - INFO - SPAdes paired-end command: R1=data/25-918_S1_L001_R1_001.fastq.gz, R2=data/25-918_S1_L001_R2_001.fastq.gz
+2025-06-26 15:16:26 - viranpy - INFO - SPAdes full command: spades.py --meta -o viranpy_results/spades_assembly --threads 12 --memory 16 -1 data/25-918_S1_L001_R1_001.fastq.gz -2 data/25-918_S1_L001_R2_001.fastq.gz
+2025-06-26 15:16:26 - viranpy - ERROR - SPAdes assembly failed: Command '['spades.py', '--meta', '-o', 'viranpy_results/spades_assembly', '--threads', '12', '--memory', '16', '-1', 'data/25-918_S1_L001_R1_001.fastq.gz', '-2', 'data/25-918_S1_L001_R2_001.fastq.gz']' returned non-zero exit status 255.
+2025-06-26 15:16:26 - viranpy - INFO - Assembly pipeline completed successfully
+2025-06-26 15:16:26 - viranpy - INFO - Completed: Assembly Pipeline (took 0.20 seconds)
+2025-06-26 15:16:26 - viranpy - ERROR - Assembly step 'megahit' failed: Command '['megahit', '-o', 'viranpy_results/megahit_assembly', '-t', '12', '-m', '17179869184', '-1', 'data/25-918_S1_L001_R1_001.fastq.gz', '-2', 'data/25-918_S1_L001_R2_001.fastq.gz']' returned non-zero exit status 1.
+2025-06-26 15:16:26 - viranpy - WARNING - No valid assembly file available for contigs taxonomy
+2025-06-26 15:16:26 - viranpy - INFO - Step 6: Coverage analysis
+2025-06-26 15:16:26 - viranpy - WARNING - No assembly file available for coverage analysis
+2025-06-26 15:16:26 - viranpy - INFO - Step 7: QUAST analysis
+2025-06-26 15:16:26 - viranpy - WARNING - No assembly file available for QUAST analysis
+2025-06-26 15:16:26 - viranpy - ERROR - Report generation failed: 'NoneType' object has no attribute 'get'
+2025-06-26 15:16:26 - viranpy - INFO - Preprocessing pipeline completed successfully
+2025-06-26 15:16:26 - viranpy - INFO - Completed: Preprocessing Pipeline (took 4.38 seconds)
+2025-06-26 15:16:26 - viranpy - INFO - Running viral annotation pipeline on assembled contigs...
+2025-06-26 15:16:26 - viranpy - WARNING - No successful assembly found for annotation. Skipping annotation pipeline.
+2025-06-26 15:16:26 - viranpy - INFO - Pipeline completed successfully

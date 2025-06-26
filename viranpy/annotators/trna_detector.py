@@ -47,6 +47,10 @@ class ViralTRNAFinder(BaseAnnotator):
         try:
             for record in SeqIO.parse(input_file, "fasta"):
                 self._find_trna_in_sequence(record)
+            
+            # Write results to log file
+            self._write_trna_log()
+            
             result.add_annotation("trna_results", self.trna_results)
             result.add_annotation("tmrna_results", self.tmrna_results)
             result.add_metadata("total_trna", sum(len(v) for v in self.trna_results.values()))
@@ -58,28 +62,59 @@ class ViralTRNAFinder(BaseAnnotator):
             self.logger.error(f"tRNA/tmRNA detection failed: {e}")
         return result.to_dict()
     
+    def _write_trna_log(self) -> None:
+        """Write tRNA/tmRNA results to a log file."""
+        output_dir = Path(self.config.root_output) / "trna_detection"
+        log_file = output_dir / "trna_tmrna_results.txt"
+        
+        with open(log_file, 'w') as f:
+            f.write("# tRNA and tmRNA Detection Results\n")
+            f.write("# Contig_ID\tType\tLocus_Tag\tProduct\tStart\tEnd\tStrand\n")
+            
+            # Write tRNA results
+            for contig_id, trnas in self.trna_results.items():
+                for trna in trnas:
+                    f.write(f"{contig_id}\ttRNA\t{trna['locus_tag']}\t{trna['product']}\t{trna['begin']}\t{trna['end']}\t{trna['strand']}\n")
+            
+            # Write tmRNA results
+            for contig_id, tmrnas in self.tmrna_results.items():
+                for tmrna in tmrnas:
+                    f.write(f"{contig_id}\ttmRNA\t{tmrna['locus_tag']}\t{tmrna['product']}\t{tmrna['begin']}\t{tmrna['end']}\t{tmrna['strand']}\n")
+        
+        self.logger.info(f"tRNA/tmRNA results written to: {log_file}")
+    
     def _find_trna_in_sequence(self, record) -> None:
         """
         Detect tRNA/tmRNA for a single viral sequence using ARAGORN.
         Results are stored in self.trna_results and self.tmrna_results.
         """
-        temp_fasta = f"temp_{record.id}.fasta"
+        # Use config's output directory for temporary and output files
+        output_dir = Path(self.config.root_output) / "trna_detection"
+        fasta_dir = output_dir / "fasta"
+        os.makedirs(output_dir, exist_ok=True)
+        os.makedirs(fasta_dir, exist_ok=True)
+        
+        temp_fasta = output_dir / f"temp_{record.id}.fasta"
+        output_file = fasta_dir / f"trna_results_{record.id}.fasta"
+        
         with open(temp_fasta, "w") as f:
             SeqIO.write(record, f, "fasta")
-        output_file = f"trna_results_{record.id}.fasta"
-            cmd = [
-            "aragorn", "-fon", f"-gc{self.config.genetic_code_table}", temp_fasta
-            ]
+        
+        cmd = [
+            "aragorn", "-fon", f"-gc{self.config.genetic_code_table}", str(temp_fasta)
+        ]
         genome_shape = getattr(self, 'topology_results', {}).get(record.id, {}).get("topology", "linear")
         if genome_shape == "circular":
-                cmd.append("-c")
-            else:
-                cmd.append("-l")
-        safe_run_cmd(cmd, self.logger, output_file=output_file)
-        self._parse_aragorn_output(record.id, output_file, temp_fasta)
-                os.remove(temp_fasta)
-        if os.path.exists(output_file):
-            os.remove(output_file)
+            cmd.append("-c")
+        else:
+            cmd.append("-l")
+        
+        safe_run_cmd(cmd, self.logger, output_file=str(output_file))
+        self._parse_aragorn_output(record.id, str(output_file), str(temp_fasta))
+        
+        # Clean up only temporary files, keep output files for inspection
+        if temp_fasta.exists():
+            temp_fasta.unlink()
     
     def _parse_aragorn_output(self, contig_id: str, output_file: str, fasta_file: str) -> None:
         """
@@ -90,12 +125,13 @@ class ViralTRNAFinder(BaseAnnotator):
         self.tmrna_results[contig_id] = []
         if not os.path.exists(output_file) or os.path.getsize(output_file) == 0:
             return
-            for tRNA_seq in SeqIO.parse(output_file, "fasta"):
-                tRNA_information = tRNA_seq.description.split(" ")
-                if tRNA_information[1] == "tmRNA":
+        
+        for tRNA_seq in SeqIO.parse(output_file, "fasta"):
+            tRNA_information = tRNA_seq.description.split(" ")
+            if tRNA_information[1] == "tmRNA":
                 tmrna_info = self._extract_tmrna_info(tRNA_information, fasta_file)
                 self.tmrna_results[contig_id].append(tmrna_info)
-                elif re.match("^tRNA-", tRNA_information[1]):
+            elif re.match("^tRNA-", tRNA_information[1]):
                 trna_info = self._extract_trna_info(tRNA_information, fasta_file)
                 self.trna_results[contig_id].append(trna_info)
 
@@ -140,4 +176,4 @@ class ViralTRNAFinder(BaseAnnotator):
         return info
     
     def get_output_files(self) -> List[str]:
-        return [f"trna_results_{contig_id}.fasta" for contig_id in self.trna_results.keys()] 
+        return [f"fasta/trna_results_{contig_id}.fasta" for contig_id in self.trna_results.keys()] 

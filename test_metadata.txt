@@ -1,0 +1,8 @@
+sample_name: test_sample
+viral_family: Coronaviridae
+viral_genus: Betacoronavirus
+viral_species: SARS-CoV-2
+host: Human
+collection_date: 2023-01-01
+location: Test Location
+source: Test Source 

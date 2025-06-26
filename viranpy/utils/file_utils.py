@@ -157,4 +157,59 @@ def count_lines_in_file(file_path: str) -> int:
         Number of lines in the file
     """
     with open(file_path, 'r') as f:
-        return sum(1 for _ in f) 
+        return sum(1 for _ in f)
+
+
+def safe_run_cmd(cmd: str, logger=None, output_file: str = None, cwd: str = None) -> subprocess.CompletedProcess:
+    """
+    Safely run a command with proper error handling and logging.
+    
+    Args:
+        cmd: Command to run (string or list)
+        logger: Logger instance for output
+        output_file: Optional output file to redirect stdout
+        cwd: Working directory for the command
+        
+    Returns:
+        subprocess.CompletedProcess object
+        
+    Raises:
+        subprocess.CalledProcessError: If command fails
+    """
+    if logger:
+        logger.info(f"Running command: {cmd}")
+    
+    # Convert string command to list if needed
+    if isinstance(cmd, str):
+        cmd = cmd.split()
+    
+    # Prepare stdout redirection if output_file is specified
+    stdout = None
+    if output_file:
+        stdout = open(output_file, 'w')
+    
+    try:
+        result = subprocess.run(
+            cmd,
+            stdout=stdout,
+            stderr=subprocess.PIPE,
+            text=True,
+            cwd=cwd,
+            check=True
+        )
+        
+        if logger:
+            logger.info(f"Command completed successfully")
+            if result.stderr:
+                logger.debug(f"Command stderr: {result.stderr}")
+        
+        return result
+        
+    except subprocess.CalledProcessError as e:
+        if logger:
+            logger.error(f"Command failed with exit code {e.returncode}")
+            logger.error(f"Command stderr: {e.stderr}")
+        raise
+    finally:
+        if stdout:
+            stdout.close() 

@@ -541,8 +541,8 @@ def parse_args(args: Optional[list] = None) -> argparse.Namespace:
 
     # Only require viral_metadata_file for actual analysis/annotation, not for db management or metadata generation
     if not parsed_args.generate_metadata and not (parsed_args.build_databases or parsed_args.check_databases):
-        # Only require for annotation/analysis
-        if not parsed_args.viral_metadata_file:
+        # Only require for annotation/analysis, not for assembly-only or QC-only
+        if not parsed_args.viral_metadata_file and not getattr(parsed_args, 'assemble_only', False) and not getattr(parsed_args, 'qc_only', False):
             parser.error("--viral-metadata is required for analysis/annotation runs.")
     
     # Warn if host genome is not provided but moving to assembly or QC
@@ -568,6 +568,9 @@ def create_config_from_args(args: argparse.Namespace) -> PipelineConfig:
     Returns:
         Pipeline configuration object
     """
+    # Check if this is a workflow that doesn't need databases
+    skip_db_check = getattr(args, 'assemble_only', False) or getattr(args, 'qc_only', False)
+    
     config = PipelineConfig()
     
     # Map arguments to config attributes
@@ -577,6 +580,14 @@ def create_config_from_args(args: argparse.Namespace) -> PipelineConfig:
     
     # Attach resume flag to config for pipeline usage
     config.resume = getattr(args, 'resume', False)
+    
+    # Skip database checks for assemble-only and qc-only workflows
+    if skip_db_check:
+        # Temporarily disable database checks by setting non_crna to True
+        # This prevents RFAM database check during config initialization
+        config.non_crna = True
+        # Also disable HMMER to avoid other database checks
+        config.no_hmmer = True
     
     return config
 
@@ -756,8 +767,20 @@ def main(args: Optional[list] = None) -> int:
             # Run quality control only
             pipeline.run_quality_control(parsed_args.read_files, parsed_args.paired)
         elif parsed_args.assemble_only:
-            # Run preprocessing and assembly only
-            pipeline.run_preprocessing_pipeline(parsed_args.read_files, parsed_args.paired)
+            # Run assembly only (without preprocessing steps)
+            logger.info("Running assembly pipeline only...")
+            
+            # Determine input files for assembly
+            if parsed_args.read_files:
+                assembly_input_files = parsed_args.read_files
+                paired = parsed_args.paired
+            else:
+                logger.error("No input files specified for assembly")
+                return 1
+            
+            # Run assembly directly
+            assembly_results = pipeline.run_assembly(assembly_input_files, paired)
+            logger.info("Assembly pipeline completed successfully")
         else:
             # Run full metagenomic pipeline: preprocessing + assembly + annotation
             logger.info("Running full metagenomic pipeline: preprocessing, assembly, and viral annotation...")

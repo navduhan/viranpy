@@ -57,8 +57,10 @@ class AssemblyStatsCalculator:
         Returns:
             Dictionary containing QUAST results
         """
-        # Always write to output_dir inside self.config.root_output
-        output_dir = os.path.join(self.config.root_output, output_dir)
+        # Only prepend root_output if output_dir is not already absolute
+        if not os.path.isabs(output_dir):
+            if hasattr(self.config, 'root_output') and self.config.root_output:
+                output_dir = os.path.join(self.config.root_output, output_dir)
         os.makedirs(output_dir, exist_ok=True)
         
         try:

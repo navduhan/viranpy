@@ -174,10 +174,61 @@ class Assembler:
         """
         # Always write to output_dir inside self.config.root_output
         output_dir = os.path.join(self.config.root_output, output_dir)
-        # MEGAHIT does not allow pre-existing output dir
+        
+        # Check if MEGAHIT has already completed successfully
+        final_contigs_file = os.path.join(output_dir, "final.contigs.fa")
+        renamed_file = os.path.join(output_dir, "contigs_renamed.fasta")
+        
+        # If we're resuming and the final contigs file exists, use it
+        if hasattr(self.config, 'resume') and self.config.resume and os.path.exists(final_contigs_file):
+            self.logger.info(f"[RESUME] Found existing MEGAHIT results: {final_contigs_file}")
+            # Check if renamed file exists, if not create it
+            if not os.path.exists(renamed_file):
+                self.logger.info("[RESUME] Creating renamed contigs file from existing MEGAHIT results")
+                self._rename_contigs_with_descriptive_headers(
+                    final_contigs_file, 
+                    renamed_file,
+                    assembly_method="megahit"
+                )
+            return {"success": True, "contigs_file": renamed_file}
+        
+        # MEGAHIT does not allow pre-existing output dir, so we need to handle this carefully
         if os.path.exists(output_dir):
-            self.logger.warning(f"MEGAHIT output directory {output_dir} already exists. Deleting it to avoid MEGAHIT error.")
-            shutil.rmtree(output_dir)
+            # Check if MEGAHIT is currently running (has intermediate files but no final output)
+            if os.path.exists(final_contigs_file):
+                self.logger.warning(f"MEGAHIT output directory {output_dir} already exists with final results. Using existing results.")
+                # Rename contigs if needed
+                if not os.path.exists(renamed_file):
+                    self._rename_contigs_with_descriptive_headers(
+                        final_contigs_file, 
+                        renamed_file,
+                        assembly_method="megahit"
+                    )
+                return {"success": True, "contigs_file": renamed_file}
+            else:
+                # Check if MEGAHIT is still running (has intermediate files)
+                intermediate_dir = os.path.join(output_dir, "intermediate_contigs")
+                if os.path.exists(intermediate_dir) and any(os.listdir(intermediate_dir)):
+                    self.logger.warning(f"MEGAHIT appears to be running in {output_dir}. Waiting for completion...")
+                    # Wait a bit and check again
+                    import time
+                    time.sleep(10)
+                    if os.path.exists(final_contigs_file):
+                        self.logger.info("MEGAHIT completed while waiting")
+                        if not os.path.exists(renamed_file):
+                            self._rename_contigs_with_descriptive_headers(
+                                final_contigs_file, 
+                                renamed_file,
+                                assembly_method="megahit"
+                            )
+                        return {"success": True, "contigs_file": renamed_file}
+                    else:
+                        self.logger.warning("MEGAHIT still running, will start fresh")
+                        shutil.rmtree(output_dir)
+                else:
+                    self.logger.warning(f"MEGAHIT output directory {output_dir} already exists. Deleting it to avoid MEGAHIT error.")
+                    shutil.rmtree(output_dir)
+        
         # Do NOT pre-create output_dir for MEGAHIT
         
         # Debug logging
@@ -261,42 +312,44 @@ class Assembler:
         Returns:
             Dictionary containing CD-HIT results
         """
-        # Ensure output_file is a simple filename, not a full path
-        output_basename = os.path.basename(output_file)
-        output_prefix = os.path.splitext(output_basename)[0]
-        
-        # Create full output path
-        if hasattr(self.config, 'root_output') and self.config.root_output:
-            output_dir = self.config.root_output
+        # If only one input file and it exists, use it directly
+        if len(input_files) == 1 and os.path.exists(input_files[0]):
+            combined_input = input_files[0]
         else:
-            output_dir = "."
-        
-        full_output_path = os.path.join(output_dir, output_prefix)
-        final_output_file = os.path.join(output_dir, output_basename)
-        
-        # Combine input files if multiple
-        combined_input = "combined_contigs.fasta"
-        self._combine_fasta_files(input_files, combined_input)
-        
-        cmd = [
-            "cd-hit-est",
-            "-i", combined_input,
-            "-o", full_output_path,
-            "-c", str(identity),
-            "-T", str(self.config.ncpus or 1)
-        ]
+            # Combine input files if multiple
+            combined_input = os.path.join(self.config.root_output, "combined_contigs.fasta")
+            self._combine_fasta_files(input_files, combined_input)
         
         try:
+            # Change to the output directory before running CD-HIT
+            original_cwd = os.getcwd()
+            output_dir = os.path.dirname(os.path.abspath(output_file))
+            os.chdir(output_dir)
+            
+            # Always use the absolute path for the input file
+            combined_input_abs = os.path.abspath(combined_input)
+            output_filename = os.path.basename(output_file)
+            
+            cmd = [
+                "cd-hit-est",
+                "-i", combined_input_abs,
+                "-o", output_filename,
+                "-c", str(identity),
+                "-T", str(self.config.ncpus or 1),
+                "-M", "0"  # Disable memory limit
+            ]
+            
             subprocess.run(cmd, check=True)
             
-            # CD-HIT creates output without extension, so we need to rename it
-            cdhit_output = full_output_path
-            if os.path.exists(cdhit_output):
-                # Rename to include .fasta extension
-                os.rename(cdhit_output, final_output_file)
+            # Change back to original directory
+            os.chdir(original_cwd)
+            
+            # CD-HIT should create the file with the exact name we specified
+            final_output_file = os.path.abspath(output_file)
+            if os.path.exists(final_output_file):
                 self.logger.info(f"CD-HIT clustering completed: {final_output_file}")
             else:
-                self.logger.error(f"CD-HIT output file not found: {cdhit_output}")
+                self.logger.error(f"CD-HIT output file not found: {final_output_file}")
                 return {"success": False, "error": "CD-HIT output file not found"}
             
             # Get statistics
@@ -304,12 +357,13 @@ class Assembler:
             return {"success": True, "output_file": final_output_file, "statistics": stats}
             
         except subprocess.CalledProcessError as e:
+            if 'original_cwd' in locals():
+                os.chdir(original_cwd)
             self.logger.error(f"CD-HIT clustering failed: {e}")
             return {"success": False, "error": str(e)}
         finally:
-            # Clean up combined file
-            if os.path.exists(combined_input):
-                os.remove(combined_input)
+            # Do NOT delete the combined input file
+            pass
     
     def create_hybrid_assembly(self, spades_contigs: str, megahit_contigs: str,
                               output_file: str = "hybrid_assembly.fasta") -> Dict[str, Any]:
@@ -317,8 +371,8 @@ class Assembler:
         Create hybrid assembly from SPAdes and MEGAHIT contigs.
         
         Args:
-            spades_contigs: SPAdes contigs file
-            megahit_contigs: MEGAHIT contigs file
+            spades_contigs: SPAdes contigs file (should be the renamed file)
+            megahit_contigs: MEGAHIT contigs file (should be the renamed file)
             output_file: Output file for hybrid assembly
             
         Returns:
@@ -340,27 +394,40 @@ class Assembler:
             # Combine contigs from both assemblers
             all_contigs = []
             
-            # Read SPAdes contigs
+            # Read SPAdes contigs (should be the renamed file)
             if os.path.exists(spades_contigs):
+                self.logger.info(f"Reading SPAdes contigs from: {spades_contigs}")
                 for record in SeqIO.parse(spades_contigs, "fasta"):
-                    record.id = f"spades_{record.id}"
+                    # The contigs are already renamed, so we don't need to add "spades_" prefix
                     all_contigs.append(record)
+            else:
+                self.logger.warning(f"SPAdes contigs file not found: {spades_contigs}")
             
-            # Read MEGAHIT contigs
+            # Read MEGAHIT contigs (should be the renamed file)
             if os.path.exists(megahit_contigs):
+                self.logger.info(f"Reading MEGAHIT contigs from: {megahit_contigs}")
                 for record in SeqIO.parse(megahit_contigs, "fasta"):
-                    record.id = f"megahit_{record.id}"
+                    # The contigs are already renamed, so we don't need to add "megahit_" prefix
                     all_contigs.append(record)
+            else:
+                self.logger.warning(f"MEGAHIT contigs file not found: {megahit_contigs}")
             
-            # Write combined contigs
-            SeqIO.write(all_contigs, "temp_combined.fasta", "fasta")
+            if not all_contigs:
+                return {"success": False, "error": "No contigs found from either assembler"}
+            
+            # Write combined contigs to the hybrid_assembly directory
+            temp_combined_file = os.path.join(output_dir, "combined_contigs.fasta")
+            SeqIO.write(all_contigs, temp_combined_file, "fasta")
+            self.logger.info(f"Combined {len(all_contigs)} contigs from both assemblers: {temp_combined_file}")
             
             # Run CD-HIT to remove redundancy
-            cdhit_result = self.run_cdhit(["temp_combined.fasta"], output_file)
+            # Use the correct output path: output_dir/hybrid_assembly (without .fasta extension for CD-HIT)
+            cdhit_output_prefix = os.path.join(output_dir, "hybrid_assembly")
+            cdhit_result = self.run_cdhit([temp_combined_file], output_file, identity=0.95)
             
-            # Clean up temporary file
-            if os.path.exists("temp_combined.fasta"):
-                os.remove("temp_combined.fasta")
+            # Keep the temporary file for debugging
+            # if os.path.exists(temp_combined_file):
+            #     os.remove(temp_combined_file)
             
             if cdhit_result["success"]:
                 # Rename contigs with descriptive headers
@@ -490,13 +557,16 @@ class Assembler:
         else:
             output_basename = os.path.basename(output_file)
         
-        # Create full output path
-        if hasattr(self.config, 'root_output') and self.config.root_output:
-            output_dir = self.config.root_output
-        else:
-            output_dir = "."
+        # Save filtered file in the same directory as the input file
+        input_dir = os.path.dirname(input_file)
+        if not input_dir:
+            # If input_file has no directory, use root output directory
+            if hasattr(self.config, 'root_output') and self.config.root_output:
+                input_dir = self.config.root_output
+            else:
+                input_dir = "."
         
-        final_output_file = os.path.join(output_dir, output_basename)
+        final_output_file = os.path.join(input_dir, output_basename)
         
         try:
             filtered_contigs = []

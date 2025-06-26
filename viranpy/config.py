@@ -123,7 +123,7 @@ class PipelineConfig:
         # BLAST database
         if self.blast_switch and self.blast_database is None:
             blast_path = package_dir / "databases" / "RefSeq_Viral_BLAST" / "refseq_viral_proteins"
-            if blast_path.with_suffix('.pdb').exists():
+            if blast_path.with_suffix('.pin').exists():
                 self.blast_database = str(blast_path)
             else:
                 raise FileNotFoundError(

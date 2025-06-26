@@ -45,20 +45,31 @@ class ViralNcRNAFinder(BaseAnnotator):
             ncpus = getattr(self.config, 'ncpus', 1)
             norfam = getattr(self.config, 'nor_fam', False)
             hmmonly = getattr(self.config, 'hmmonly', False)
-            output_file = f"ncrna_results_{Path(input_file).stem}.csv"
+            
+            # Use config's output directory
+            output_dir = Path(self.config.root_output) / "ncrna_detection"
+            os.makedirs(output_dir, exist_ok=True)
+            output_file = output_dir / f"ncrna_results_{Path(input_file).stem}.csv"
+            
             cmd = ["cmscan"]
             if not norfam:
                 cmd.append("--rfam")
             elif hmmonly:
                 cmd.append("--hmmonly")
-            cmd.extend(["--cut_ga", "--tblout", output_file, "--cpu", str(ncpus), rfam_db, input_file])
+            cmd.extend(["--cut_ga", "--tblout", str(output_file), "--cpu", str(ncpus), rfam_db, input_file])
             safe_run_cmd(cmd, self.logger)
-            self.ncrna_results = self._parse_ncrna_output(output_file)
+            self.ncrna_results = self._parse_ncrna_output(str(output_file))
+            
+            # Write results to log file
+            self._write_ncrna_log()
+            
             result.add_annotation("ncrna_results", self.ncrna_results)
             result.add_metadata("total_ncrna", sum(len(v) for v in self.ncrna_results.values()))
             self.logger.info(f"ncRNA detection completed: {result.metadata['total_ncrna']} ncRNAs found")
-            if os.path.exists(output_file):
-                os.remove(output_file)
+            
+            # Clean up output file
+            if output_file.exists():
+                output_file.unlink()
         except Exception as e:
             result.success = False
             result.error_message = str(e)
@@ -95,4 +106,19 @@ class ViralNcRNAFinder(BaseAnnotator):
         return ncrna_dict
 
     def get_output_files(self) -> List[str]:
-        return [f"ncrna_results_{contig_id}.csv" for contig_id in self.ncrna_results.keys()] 
+        return [f"ncrna_results_{contig_id}.csv" for contig_id in self.ncrna_results.keys()]
+
+    def _write_ncrna_log(self) -> None:
+        """Write ncRNA results to a log file."""
+        output_dir = Path(self.config.root_output) / "ncrna_detection"
+        log_file = output_dir / "ncrna_results.txt"
+        
+        with open(log_file, 'w') as f:
+            f.write("# ncRNA Detection Results\n")
+            f.write("# Contig_ID\tLocus_Tag\tType\tProduct\tStart\tEnd\tStrand\tScore\tRFAM_Code\n")
+            
+            for contig_id, ncrnas in self.ncrna_results.items():
+                for ncrna in ncrnas:
+                    f.write(f"{contig_id}\t{ncrna['locus_tag']}\t{ncrna['type']}\t{ncrna['product']}\t{ncrna['begin']}\t{ncrna['end']}\t{ncrna['strand']}\t{ncrna['score']}\t{ncrna['rfam_code']}\n")
+        
+        self.logger.info(f"ncRNA results written to: {log_file}") 

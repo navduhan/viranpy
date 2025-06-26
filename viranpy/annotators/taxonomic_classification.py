@@ -43,6 +43,54 @@ class TaxonomicClassificationAnnotator(BaseAnnotator):
             return False
         return True
     
+    def validate_input(self, input_file: str) -> bool:
+        """
+        Validate input file for taxonomic classification.
+        
+        Args:
+            input_file: Input FASTA file path
+            
+        Returns:
+            True if input is valid, False otherwise
+        """
+        if not input_file or not os.path.exists(input_file):
+            self.logger.error(f"Input file does not exist: {input_file}")
+            return False
+        
+        # Check if file is a valid FASTA file
+        try:
+            with open(input_file, 'r') as f:
+                first_line = f.readline().strip()
+                if not first_line.startswith('>'):
+                    self.logger.error(f"Input file is not a valid FASTA file: {input_file}")
+                    return False
+        except Exception as e:
+            self.logger.error(f"Error reading input file {input_file}: {e}")
+            return False
+        
+        return True
+    
+    def run(self, input_file: str, **kwargs) -> Dict[str, Any]:
+        """
+        Run the taxonomic classification annotation step.
+        
+        Args:
+            input_file: Input FASTA file path
+            **kwargs: Additional arguments
+            
+        Returns:
+            Dictionary containing annotation results
+        """
+        result = self.annotate(input_file)
+        
+        return {
+            "success": result.success,
+            "output_files": result.output_files,
+            "annotations": result.annotations,
+            "metadata": result.metadata,
+            "error_message": result.error_message
+        }
+    
     def annotate(self, input_file: str) -> AnnotationResult:
         """
         Run taxonomic classification on contigs.
@@ -109,12 +157,13 @@ class TaxonomicClassificationAnnotator(BaseAnnotator):
     
     def _run_kraken2_classification(self, input_file: str) -> Dict[str, Any]:
         """Run Kraken2 classification on contigs."""
-        output_dir = "kraken2_contigs_results"
+        # Use the config's output directory
+        output_dir = Path(self.config.root_output) / "kraken2_contigs_results"
         os.makedirs(output_dir, exist_ok=True)
         
         base_name = Path(input_file).stem
-        report_file = Path(output_dir) / f"{base_name}_kraken2.report"
-        output_file = Path(output_dir) / f"{base_name}_kraken2.out"
+        report_file = output_dir / f"{base_name}_kraken2.report"
+        output_file = output_dir / f"{base_name}_kraken2.out"
         
         kraken_db = getattr(self.config, 'kraken2_db', None)
         
@@ -151,27 +200,34 @@ class TaxonomicClassificationAnnotator(BaseAnnotator):
     
     def _create_krona_visualization(self) -> Optional[str]:
         """Create Krona visualization of taxonomic classification."""
-        output_dir = "kraken2_contigs_results"
+        # Use the config's output directory
+        output_dir = Path(self.config.root_output) / "kraken2_contigs_results"
         kraken_files = []
         
-        for file_path in Path(output_dir).glob("*_kraken2.out"):
+        for file_path in output_dir.glob("*_kraken2.out"):
             kraken_files.append(str(file_path))
         
         if not kraken_files:
             self.logger.warning("No Kraken2 output files found for Krona visualization")
             return None
         
-        krona_html = Path(output_dir) / "contigs_taxonomy_krona.html"
+        krona_html = output_dir / "contigs_taxonomy_krona.html"
         
-        cmd = ["ktImportTaxonomy", "-o", str(krona_html)]
+        cmd = ["ktImportTaxonomy", "-t", "5", "-m", "3", "-o", str(krona_html)]
         cmd.extend(kraken_files)
         
         try:
-            subprocess.run(cmd, check=True)
+            subprocess.run(cmd, check=True, capture_output=True, text=True)
             self.logger.info(f"Krona visualization created: {krona_html}")
             return str(krona_html)
         except subprocess.CalledProcessError as e:
-            self.logger.error(f"Krona visualization failed: {e}")
+            self.logger.warning(f"Krona visualization failed (this is optional): {e}")
+            if "taxonomy" in e.stderr.lower():
+                self.logger.info("Krona taxonomy database not found. Krona visualization skipped.")
+                self.logger.info("To enable Krona visualization, run: ktUpdateTaxonomy.sh")
+            return None
+        except FileNotFoundError:
+            self.logger.warning("Krona tools not found. Krona visualization skipped.")
             return None
     
     def _parse_kraken2_report(self, report_file: Path) -> Dict[str, Any]:
